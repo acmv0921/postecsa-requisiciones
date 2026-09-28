@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Requisiciones POSTECSA v1.1 — build 2026-09-27 -->
+<!-- Requisiciones POSTECSA v1.2 — build 2026-09-28 -->
 <html lang="es-CO">
 <head>
 <meta charset="UTF-8">
@@ -185,8 +185,8 @@ footer.ver{text-align:center;color:var(--muted);font-size:.78rem;padding:10px 0 
     <img class="login-logo" src="./logo.jpg" alt="POSTECSA" onerror="this.style.display='none'">
     <h1>Requisiciones</h1>
     <p class="sub">POSTEC DE OCCIDENTE S.A.S. — formato FP-08-03</p>
-    <label class="f" for="loginCorreo">Correo</label>
-    <input id="loginCorreo" class="inp" type="email" autocomplete="username" placeholder="tu@correo.com">
+    <label class="f" for="loginCorreo">Cédula</label>
+    <input id="loginCorreo" class="inp" type="text" autocomplete="username" placeholder="Número de cédula (sin puntos)">
     <label class="f" for="loginPin">PIN</label>
     <div class="pin-field-wrap">
       <input id="loginPin" class="inp" type="password" autocomplete="current-password" placeholder="Tu PIN personal" maxlength="20">
@@ -223,7 +223,7 @@ footer.ver{text-align:center;color:var(--muted);font-size:.78rem;padding:10px 0 
 
 <script>
 // ================= CONFIG =================
-const APP_VERSION = '1.1';
+const APP_VERSION = '1.2';
 const GAS_URL = 'PEGAR_AQUI_URL_EXEC_DEL_GAS_DE_REQUISICIONES';
 const SESION_KEY = 'rqpostecsa_sesion_v1';
 const ETAPAS = ['Solicitada','Clasificada','Aprobada','Cotizada','Comprada','Recibida'];
@@ -254,8 +254,11 @@ function veTodo(){ return ['CLASIFICADOR_MTTO','APROBADOR_MTTO','APROBADOR_GENER
 function nuevoId(){ return 'R'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,6).toUpperCase(); }
 function togglePin(b){ const i=b.previousElementSibling; i.type=i.type==='password'?'text':'password'; b.textContent=i.type==='password'?'VER':'OCULTAR'; }
 
-async function hashPin(correo, pin){
-  const data=new TextEncoder().encode(String(correo).trim().toLowerCase()+'|'+String(pin).trim());
+/** Identificador: cédula → solo dígitos; correo → minúsculas (igual que el backend). */
+function normId(v){ const s=String(v||'').trim().toLowerCase(); return s.indexOf('@')>=0? s : s.replace(/\D/g,''); }
+
+async function hashPin(id, pin){
+  const data=new TextEncoder().encode(normId(id)+'|'+String(pin).trim());
   const buf=await crypto.subtle.digest('SHA-256', data);
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
 }
@@ -311,10 +314,10 @@ async function enviarYConfirmar(body, verificar, msgOk){
 
 // ================= LOGIN =================
 async function hacerLogin(){
-  const correo=$('loginCorreo').value.trim().toLowerCase();
+  const correo=normId($('loginCorreo').value);
   const pin=$('loginPin').value.trim();
   const err=$('loginErr');
-  if(!correo||!pin){ err.textContent='Escribe tu correo y tu PIN.'; return; }
+  if(!correo||!pin){ err.textContent='Escribe tu cédula y tu PIN.'; return; }
   if(GAS_URL.indexOf('https://')!==0){ err.textContent='Falta configurar GAS_URL en index.html.'; return; }
   err.textContent='Verificando…'; $('btnLogin').disabled=true;
   try{
@@ -390,7 +393,7 @@ function accionesPara(r){
   if(r.estado==='Solicitada' && !esMtto(r) && tiene('APROBADOR_GENERAL')) a.push('aprobar');
   if((r.estado==='Aprobada'||r.estado==='Cotizada') && tiene('COMPRAS')) a.push('cotizar');
   if(r.estado==='Cotizada' && tiene('COMPRAS')) a.push('comprar');
-  if(r.estado==='Comprada' && (tiene('COMPRAS')||tiene('ADMIN')||r.solicitante_correo===STATE.correo)) a.push('recibir');
+  if(r.estado==='Comprada' && (tiene('COMPRAS')||tiene('ADMIN')||r.solicitante_id===STATE.correo)) a.push('recibir');
   return a;
 }
 function pendientes(){
@@ -398,7 +401,7 @@ function pendientes(){
     const a=accionesPara(r);
     if(!a.length) return false;
     // el recibido del propio solicitante no llena la bandeja si Compras también puede hacerlo
-    if(a.length===1 && a[0]==='recibir' && !tiene('COMPRAS')) return r.solicitante_correo===STATE.correo;
+    if(a.length===1 && a[0]==='recibir' && !tiene('COMPRAS')) return r.solicitante_id===STATE.correo;
     return true;
   });
 }
@@ -453,7 +456,7 @@ function irA(tab){
 function vistaLista(){
   let lista;
   if(STATE.tab==='bandeja') lista=pendientes();
-  else if(STATE.tab==='mias') lista=STATE.reqs.filter(r=>r.solicitante_correo===STATE.correo);
+  else if(STATE.tab==='mias') lista=STATE.reqs.filter(r=>r.solicitante_id===STATE.correo);
   else lista=STATE.reqs.slice();
 
   const txt=STATE.filtroTxt.toLowerCase();
@@ -986,7 +989,7 @@ async function cambiarPin(){
 
 function modalUsuarios(){
   const lista=STATE.usuarios.map(u=>`<div class="urow"><div><b>${esc(u.nombre)}</b> ${u.estado!=='ACTIVO'?'<span class="pill Rechazada">Inactivo</span>':''}
-    <div class="rq-m">${esc(u.correo)} — ${u.roles.map(r=>esc(ROL_TXT[r]||r)).join(', ')}</div></div>
+    <div class="rq-m">${u.cedula?'CC '+esc(u.cedula):esc(u.correo)} — ${u.roles.map(r=>esc(ROL_TXT[r]||r)).join(', ')}</div></div>
     <button class="btn sec sm" onclick="formUsuario('${esc(u.id_usuario)}')">Editar</button></div>`).join('');
   modal(`<h3>Usuarios</h3>${lista||'<p>Sin usuarios.</p>'}
     <div class="row-actions"><button class="btn" onclick="formUsuario('')">+ Nuevo usuario</button><button class="btn sec" onclick="cerrarModal()">Cerrar</button></div>`);
@@ -994,11 +997,13 @@ function modalUsuarios(){
 
 function formUsuario(idu){
   const u=STATE.usuarios.find(x=>x.id_usuario===idu)||{roles:['SOLICITANTE'],estado:'ACTIVO'};
+  const llaveDe=x=>normId(x.cedula)||normId(x.correo);
   const roles=STATE.config.roles||Object.keys(ROL_TXT);
   modal(`<h3>${idu?'Editar usuario':'Nuevo usuario'}</h3>
     <input type="hidden" id="fuId" value="${esc(idu)}">
     <label class="f">Nombre</label><input class="inp" id="fuNom" value="${esc(u.nombre||'')}">
-    <label class="f">Correo</label><input class="inp" id="fuCor" type="email" value="${esc(u.correo||'')}">
+    <label class="f">Cédula (con ella ingresa)</label><input class="inp" id="fuCed" inputmode="numeric" value="${esc(u.cedula||'')}" placeholder="Sin puntos">
+    <label class="f">Correo (para avisos; opcional)</label><input class="inp" id="fuCor" type="email" value="${esc(u.correo||'')}">
     <label class="f">Roles</label><div class="roles-chk">${roles.map(r=>`<label><input type="checkbox" class="fuRol" value="${r}"${u.roles.indexOf(r)>=0?' checked':''}> ${esc(ROL_TXT[r]||r)}</label>`).join('')}</div>
     <label class="f">Área(s) sugerida(s) — separadas por coma</label><input class="inp" id="fuAre" value="${esc(u.areas||'')}" placeholder="Ej.: Laboratorio,Producción">
     <label class="f">Teléfono</label><input class="inp" id="fuTel" value="${esc(u.telefono||'')}">
@@ -1008,18 +1013,22 @@ function formUsuario(idu){
 }
 
 async function guardarUsuario(){
-  const id=$('fuId').value, nombre=$('fuNom').value.trim(), correo=$('fuCor').value.trim().toLowerCase(), pin=$('fuPin').value.trim();
+  const id=$('fuId').value, nombre=$('fuNom').value.trim(), cedula=normId($('fuCed').value), correo=$('fuCor').value.trim().toLowerCase(), pin=$('fuPin').value.trim();
+  const llave=cedula||correo;
   const roles=[...document.querySelectorAll('.fuRol')].filter(c=>c.checked).map(c=>c.value);
-  if(!nombre||correo.indexOf('@')<1){ toast('Nombre y correo válidos son obligatorios.','err'); return; }
+  if(!nombre||!llave){ toast('El nombre y la cédula son obligatorios.','err'); return; }
+  if(correo && correo.indexOf('@')<1){ toast('El correo no es válido.','err'); return; }
+  const antes=STATE.usuarios.find(z=>z.id_usuario===id);
+  if(antes && (normId(antes.cedula)||normId(antes.correo))!==llave && !pin){ toast('Cambió la cédula de ingreso: asigna también un PIN nuevo.','err'); return; }
   if(!roles.length){ toast('Asigna al menos un rol.','err'); return; }
   const yo=STATE.usuarios.find(z=>z.id_usuario===id);
-  if(pin && yo && yo.correo===STATE.correo){ toast('Para tu propio PIN usa “Cambiar mi PIN” en el menú.','err'); return; }
+  if(pin && yo && yo.llave===STATE.correo){ toast('Para tu propio PIN usa “Cambiar mi PIN” en el menú.','err'); return; }
   if(!id && pin.length<4){ toast('Asigna un PIN inicial de mínimo 4 caracteres.','err'); return; }
   if(pin && pin.length<4){ toast('El PIN debe tener mínimo 4 caracteres.','err'); return; }
-  const usuario={id_usuario:id,nombre,correo,roles:roles.join(','),areas:$('fuAre').value.trim(),telefono:$('fuTel').value.trim(),estado:$('fuEst').value};
-  if(pin) usuario.pin_hash=await hashPin(correo,pin);
+  const usuario={id_usuario:id,nombre,cedula,correo,roles:roles.join(','),areas:$('fuAre').value.trim(),telefono:$('fuTel').value.trim(),estado:$('fuEst').value};
+  if(pin) usuario.pin_hash=await hashPin(llave,pin);
   const ok=await enviarYConfirmar({accion:'guardarUsuario',usuario},
-    ()=>{ const x=STATE.usuarios.find(z=>z.correo===correo); return x && x.nombre===nombre && x.estado===usuario.estado && x.roles.join(',')===roles.join(','); },
+    ()=>{ const x=STATE.usuarios.find(z=>z.llave===llave); return x && x.nombre===nombre && x.estado===usuario.estado && x.roles.join(',')===roles.join(','); },
     'Usuario guardado'+(pin?' — entrega el PIN a '+nombre:''));
   if(ok) modalUsuarios();
 }
