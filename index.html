@@ -242,7 +242,7 @@ footer.ver{text-align:center;color:var(--muted);font-size:.78rem;padding:10px 0 
 
 <script>
 // ================= CONFIG =================
-const APP_VERSION = '1.3';
+const APP_VERSION = '1.3.1';
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwprFkXpqGwNORgmXh-qXSxgCieiO1n07A95TqFaB_kCyju4T7d-ZsNQvbZHy42uIhV/exec';
 const SESION_KEY = 'rqpostecsa_sesion_v1';
 const ETAPAS = ['Solicitada','Clasificada','Aprobada','Cotizada','Comprada','Recibida'];
@@ -923,9 +923,9 @@ function modalMaestros(){
     <div class="row-actions"><button class="btn sec" onclick="cerrarModal()">Cerrar</button></div>`);
 }
 function cmMsg(t){ const e=$('cmProg'); if(e) e.innerHTML=t; }
-async function enviarBloques(tipo, filas, extra, tam){
+async function enviarBloques(tipo, filas, extra, tam, etiqueta){
   for(let i=0;i<filas.length;i+=tam){
-    cmMsg(`Enviando ${tipo}: ${Math.min(i+tam,filas.length)} de ${filas.length}…`);
+    cmMsg(`Enviando ${etiqueta||tipo}: ${Math.min(i+tam,filas.length)} de ${filas.length}…`);
     await escribirGAS(Object.assign({accion:'importarMaestros',tipo,filas:filas.slice(i,i+tam)}, extra||{}, i===0?{primero:true}:{}));
   }
 }
@@ -936,7 +936,7 @@ async function cargaInicial(){
   try{
     cmMsg('Leyendo datos de carga…');
     const seed=await (await fetch('./maestros_seed.json',{cache:'no-store'})).json();
-    await enviarBloques('artículos', seed.articulos, {}, 250);
+    await enviarBloques('articulos', seed.articulos, {}, 250, 'artículos');
     await enviarBloques('proveedores', seed.proveedores, {}, 250);
     await enviarBloques('precios', seed.precios, {periodo:seed.periodo}, 250);
     if(_SANDBOX){ cmMsg('Modo prueba: no se guardó nada.'); return; }
