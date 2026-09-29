@@ -242,7 +242,7 @@ footer.ver{text-align:center;color:var(--muted);font-size:.78rem;padding:10px 0 
 
 <script>
 // ================= CONFIG =================
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.4';
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwprFkXpqGwNORgmXh-qXSxgCieiO1n07A95TqFaB_kCyju4T7d-ZsNQvbZHy42uIhV/exec';
 const SESION_KEY = 'rqpostecsa_sesion_v1';
 const ETAPAS = ['Solicitada','Clasificada','Aprobada','Cotizada','Comprada','Recibida'];
@@ -389,7 +389,7 @@ async function cargarDatos(silencioso){
     const j=await leerGAS({accion:'datos',correo:STATE.correo,h:STATE.h});
     STATE.usuario=j.usuario; STATE.config=j.config;
     STATE.reqs=j.reqs||[]; STATE.items=j.items||[]; STATE.historial=j.historial||[]; STATE.usuarios=j.usuarios||[];
-    STATE.articulos=j.articulos||[]; STATE.proveedores=j.proveedores||[]; STATE.precios=j.precios||[];
+    STATE.articulos=j.articulos||[]; STATE.proveedores=j.proveedores||[]; STATE.precios=j.precios||[]; STATE.numerosUsados=j.numeros_usados||[];
     STATE.reqs.sort((a,b)=>String(b.fecha_solicitud).localeCompare(String(a.fecha_solicitud)));
     if(!silencioso){ render(); }
   }catch(e){
@@ -449,7 +449,7 @@ function render(){
   if(STATE.tab==='detalle' && STATE.detalle) v.innerHTML=vistaDetalle(STATE.detalle);
   else if(STATE.tab==='nueva'){
     if($('itemsBody')) return;               // no borrar lo que el usuario ya escribió
-    v.innerHTML=vistaNueva(); agregarFila(); agregarFila(); agregarFila(); avisoRuta();
+    v.innerHTML=vistaNueva(); agregarFila(); agregarFila(); agregarFila(); avisoRuta(); avisoNumero();
   }
   else if(STATE.tab==='catalogos') v.innerHTML=vistaCatalogos();
   else if(STATE.tab==='estadisticas') v.innerHTML=vistaEstadisticas();
@@ -674,11 +674,14 @@ function vistaNueva(){
     <h2>Nueva requisición</h2>
     <p class="rq-m" style="margin:0 0 8px">Solicitante: <b>${esc(STATE.usuario.nombre)}</b> — la fecha y el número se asignan al guardar.</p>
     <div class="grid">
-      <div><label class="f" for="nvArea">Área</label><select class="inp" id="nvArea" onchange="avisoRuta()"><option value="">Elige el área…</option>
+      <div><label class="f" for="nvArea">Área</label><select class="inp" id="nvArea" onchange="avisoRuta();avisoNumero()"><option value="">Elige el área…</option>
         ${areas.map(a=>`<option${a===def?' selected':''}>${esc(a)}</option>`).join('')}</select></div>
       <div><label class="f" for="nvPrio">Prioridad</label><select class="inp" id="nvPrio">${optsPrioridad('Normal')}</select></div>
     </div>
     <p class="rq-m" id="nvRuta" style="margin:8px 0 0"></p>
+    <label class="f" for="nvNum">N.º de requisición <span class="rq-m">(opcional: si lo dejas vacío se asigna el siguiente)</span></label>
+    <div style="display:flex;gap:8px;align-items:center"><span class="cod" id="nvPref" style="font-size:12pt">—</span><input class="inp" id="nvNum" inputmode="numeric" maxlength="7" placeholder="Automático" oninput="avisoNumero()" style="max-width:180px"></div>
+    <p class="rq-m" id="nvNumMsg" style="margin:6px 0 0"></p>
     <label class="f" for="nvJust">Justificación / observación general</label>
     <textarea class="inp" id="nvJust" placeholder="Para qué se necesita (equipo, orden de mantenimiento, lote de producción…)"></textarea>
   </div>
@@ -694,6 +697,29 @@ function vistaNueva(){
   `;
 }
 
+function numeroInfo(area, val){
+  const cfg=STATE.config||{}, pref=(cfg.prefijos||{})[area]||'', base=Number((cfg.bases||{})[pref]||0);
+  if(!pref) return {estado:'sinarea', pref:'', num:'', msg:'Elige el área para ver el prefijo.'};
+  const norm=c=>{ c=String(c||'').trim(); return (/^\d+$/.test(c)&&pref==='MTTO')?'MTTO-'+Number(c):c; };
+  const usados=new Set((STATE.numerosUsados||[]).concat(STATE.reqs.map(r=>r.consecutivo)).map(norm));
+  let max=base; usados.forEach(c=>{ const m=c.match(/^([A-Z]+)-(\d+)$/); if(m&&m[1]===pref) max=Math.max(max,Number(m[2])); });
+  const v=String(val||'').trim();
+  if(!v) return {estado:'auto', pref, num:'', cons:pref+'-'+(max+1), msg:'Automático: se asignará '+pref+'-'+(max+1)+' al guardar.'};
+  if(!/^\d{1,7}$/.test(v)||Number(v)<1) return {estado:'invalido', pref, num:'', msg:'Solo dígitos y mayor que 0 (máximo 7).'};
+  const n=Number(v), cons=pref+'-'+n;
+  if(usados.has(cons)){ const r=STATE.reqs.find(x=>String(x.consecutivo)===cons);
+    return {estado:'usado', pref, num:String(n), cons, msg:'✕ '+cons+' ya está usado'+(r?' ('+r.solicitante_nombre+', '+fFecha(r.fecha_solicitud)+')':'')+'. Elige otro.'}; }
+  if(n<=base) return {estado:'fisico', pref, num:String(n), cons, msg:'⚠ '+cons+' está dentro del talonario físico (hasta '+pref+'-'+base+'). Confirma que no lo hayas usado en papel.'};
+  return {estado:'libre', pref, num:String(n), cons, msg:'✓ '+cons+' disponible.'};
+}
+function avisoNumero(){
+  const a=$('nvArea'), m=$('nvNumMsg'), p=$('nvPref'), b=$('btnCrear'); if(!a||!m||!p) return;
+  const inf=numeroInfo(a.value, ($('nvNum')||{}).value);
+  p.textContent=inf.pref?inf.pref+'-':'—';
+  m.textContent=inf.msg;
+  m.style.color=({usado:'#b3261e',invalido:'#b3261e',fisico:'#8a5a00',libre:'#1b6e3c'})[inf.estado]||'';
+  if(b) b.disabled=(inf.estado==='usado'||inf.estado==='invalido');
+}
 function avisoRuta(){
   const a=$('nvArea'), p=$('nvRuta'); if(!a||!p) return;
   p.textContent = !a.value ? '' : a.value==='Mantenimiento'
@@ -728,10 +754,17 @@ async function crearRequisicion(){
   });
   if(error){ toast(error,'err'); return; }
   if(!items.length){ toast('Agrega al menos un artículo.','err'); return; }
+  await cargarDatos(true);   // refresca los números usados justo antes de validar
+  const inf=numeroInfo(area, ($('nvNum')||{}).value); avisoNumero();
+  if(inf.estado==='invalido'||inf.estado==='usado'){ toast(inf.msg,'err'); return; }
   const id=nuevoId();
-  const ok=await enviarYConfirmar({accion:'crear',id_req:id,area,prioridad,justificacion,items},
+  const ok=await enviarYConfirmar({accion:'crear',id_req:id,area,prioridad,justificacion,items,numero:inf.num||''},
     ()=>!!STATE.reqs.find(r=>r.id_req===id), 'Requisición enviada');
   if(ok){ if(_SANDBOX){ irA('mias'); } else abrirDetalle(id); STATE.volverA='mias'; }
+  else if(inf.num && !_SANDBOX && !STATE.reqs.find(r=>r.id_req===id)){
+    await cargarDatos(true); avisoNumero();
+    if(numeroInfo(area,inf.num).estado==='usado') toast('El número '+inf.cons+' ya estaba en uso. Elige otro.','err');
+  }
 }
 
 // ================= IMPRESIÓN FP-08-03 =================
