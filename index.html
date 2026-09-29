@@ -89,6 +89,16 @@ main{max-width:1000px;margin:0 auto;padding:14px 14px 90px}
 .pill.Alta{background:#fde9dd;color:var(--action-d)}
 .pill.Rechazada{background:#fbe3e1;color:var(--bad)}
 .pill.Recibida{background:#e1f2e7;color:var(--ok)}
+.pill.Autorizada{background:#e1f2e7;color:var(--ok)}
+.pill.Cotizada{background:#fff1d6;color:var(--warn)}
+.ofer{border:1.5px solid var(--line);border-radius:10px;padding:12px;margin:10px 0;background:#fff}
+.ofer-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.ofer-h .radio{font-weight:600;flex:1}
+.doc{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.up{margin-top:12px;padding-top:12px;border-top:1.5px dashed var(--line)}
+.warn-box{background:#fff1d6;border-left:5px solid var(--warn);border-radius:8px;padding:8px 12px}
+.tbl-wrap td.n{text-align:right;white-space:nowrap}
+table.fp tr.sel td{background:#fff8f3}
 .rq-items{font-size:.9rem;margin-top:6px;color:#33475b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* riel de etapas: el elemento distintivo — es una secuencia real */
@@ -242,12 +252,13 @@ footer.ver{text-align:center;color:var(--muted);font-size:.78rem;padding:10px 0 
 
 <script>
 // ================= CONFIG =================
-const APP_VERSION = '1.4';
+const APP_VERSION = '1.5';
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwprFkXpqGwNORgmXh-qXSxgCieiO1n07A95TqFaB_kCyju4T7d-ZsNQvbZHy42uIhV/exec';
 const SESION_KEY = 'rqpostecsa_sesion_v1';
-const ETAPAS = ['Solicitada','Clasificada','Aprobada','Cotizada','Comprada','Recibida'];
+const ETAPAS = ['Solicitada','Clasificada','Aprobada','Cotizada','Autorizada','Comprada','Recibida'];
 const ROL_TXT = {SOLICITANTE:'Solicitante',CLASIFICADOR_MTTO:'Clasifica Mantenimiento',APROBADOR_MTTO:'Aprueba Mantenimiento',
-  APROBADOR_GENERAL:'Aprueba otras áreas',COMPRAS:'Compras',ADMIN:'Administrador'};
+  APROBADOR_GENERAL:'Aprueba otras áreas',AUTORIZADOR_COMPRA_MTTO:'Autoriza compras de Mantenimiento',
+  AUTORIZADOR_COMPRA_GENERAL:'Autoriza compras de otras áreas',COMPRAS:'Compras',ADMIN:'Administrador'};
 
 // ================= ESTADO =================
 const STATE = { correo:'', h:'', usuario:null, config:null, reqs:[], items:[], historial:[], usuarios:[], articulos:[], proveedores:[], precios:[],
@@ -269,7 +280,7 @@ function pesos(v){ const n=Number(String(v||'').replace(/[^\d.]/g,'')); return n
 function fFecha(s){ if(!s) return '—'; const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}:\d{2}))?/); return m? `${m[3]}/${m[2]}/${m[1]}${m[4]?' '+m[4]:''}` : s; }
 function hoyISO(){ const d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,10); }
 function tiene(rol){ return !!(STATE.usuario && STATE.usuario.roles.indexOf(rol)>=0); }
-function veTodo(){ return ['CLASIFICADOR_MTTO','APROBADOR_MTTO','APROBADOR_GENERAL','COMPRAS','ADMIN'].some(tiene); }
+function veTodo(){ return ['CLASIFICADOR_MTTO','APROBADOR_MTTO','APROBADOR_GENERAL','AUTORIZADOR_COMPRA_MTTO','AUTORIZADOR_COMPRA_GENERAL','COMPRAS','ADMIN'].some(tiene); }
 function nuevoId(){ return 'R'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,6).toUpperCase(); }
 function togglePin(b){ const i=b.previousElementSibling; i.type=i.type==='password'?'text':'password'; b.textContent=i.type==='password'?'VER':'OCULTAR'; }
 
@@ -308,14 +319,14 @@ async function escribirGAS(body){
 }
 
 /** Escribe (no-cors, sin respuesta) y CONFIRMA releyendo del servidor. */
-async function enviarYConfirmar(body, verificar, msgOk){
+async function enviarYConfirmar(body, verificar, msgOk, intentos){
   if(_guardando){ toast('Ya se está guardando…'); return false; }
   _guardando=true;
   document.body.classList.add('loading');
   try{
     await escribirGAS(body);
     if(_SANDBOX) return true;
-    for(let i=0;i<5;i++){
+    for(let i=0;i<(intentos||5);i++){
       await cargarDatos(true);
       if(verificar()){ toast(msgOk); render(); return true; }
       await sleep(1500);
@@ -390,6 +401,7 @@ async function cargarDatos(silencioso){
     STATE.usuario=j.usuario; STATE.config=j.config;
     STATE.reqs=j.reqs||[]; STATE.items=j.items||[]; STATE.historial=j.historial||[]; STATE.usuarios=j.usuarios||[];
     STATE.articulos=j.articulos||[]; STATE.proveedores=j.proveedores||[]; STATE.precios=j.precios||[]; STATE.numerosUsados=j.numeros_usados||[];
+    STATE.documentos=j.documentos||[]; STATE.cotizaciones=j.cotizaciones||[]; STATE.autorizadoresMtto=j.autorizadores_mtto||[];
     STATE.reqs.sort((a,b)=>String(b.fecha_solicitud).localeCompare(String(a.fecha_solicitud)));
     if(!silencioso){ render(); }
   }catch(e){
@@ -411,7 +423,8 @@ function accionesPara(r){
   if(r.estado==='Clasificada' && esMtto(r) && tiene('APROBADOR_MTTO')) a.push('aprobar');
   if(r.estado==='Solicitada' && !esMtto(r) && tiene('APROBADOR_GENERAL')) a.push('aprobar');
   if((r.estado==='Aprobada'||r.estado==='Cotizada') && tiene('COMPRAS')) a.push('cotizar');
-  if(r.estado==='Cotizada' && tiene('COMPRAS')) a.push('comprar');
+  if(r.estado==='Cotizada' && puedeAutorizar(r)) a.push('autorizar');
+  if(r.estado==='Autorizada' && tiene('COMPRAS')) a.push('comprar');
   if(r.estado==='Comprada' && (tiene('COMPRAS')||tiene('ADMIN')||r.solicitante_id===STATE.correo)) a.push('recibir');
   return a;
 }
@@ -426,7 +439,7 @@ function pendientes(){
 }
 function siguientePaso(r){
   const m={Solicitada: esMtto(r)?'Clasificación (Weimar)':'Aprobación (Lorena)', Clasificada:'Aprobación (Abdiel)',
-    Aprobada:'Cotización (Compras)', Cotizada:'Compra (Compras)', Comprada:'Recibido en almacén', Recibida:'Cerrada', Rechazada:'Cerrada'};
+    Aprobada:'Cotización (Compras)', Cotizada:esMtto(r)?'Autorización (Abdiel)':'Autorización (Lorena o Gerencia)', Autorizada:'Compra (Compras)', Comprada:'Recibido en almacén', Recibida:'Cerrada', Rechazada:'Cerrada'};
   return m[r.estado]||'';
 }
 
@@ -435,7 +448,7 @@ function railHTML(r, big){
   let idx = etapas.indexOf(r.estado);
   if(r.estado==='Rechazada'){
     const cl = r.clasificado_por && !r.aprobador; // rechazo en clasificación
-    idx = cl ? etapas.indexOf('Clasificada') : etapas.indexOf('Aprobada');
+    idx = r.autorizado_por ? etapas.indexOf('Autorizada') : (cl ? etapas.indexOf('Clasificada') : etapas.indexOf('Aprobada'));
     return `<div class="rail${big?' big':''}">`+etapas.map((e,i)=>`<div class="st ${i<idx?'done':i===idx?'rej':''}">${i===idx?'Rechazada':esc(e)}</div>`).join('')+`</div>`;
   }
   return `<div class="rail${big?' big':''}">`+etapas.map((e,i)=>`<div class="st ${i<idx?'done':i===idx?(e==='Recibida'?'done':'cur'):''}">${esc(e)}</div>`).join('')+`</div>`;
@@ -451,6 +464,7 @@ function render(){
     if($('itemsBody')) return;               // no borrar lo que el usuario ya escribió
     v.innerHTML=vistaNueva(); agregarFila(); agregarFila(); agregarFila(); avisoRuta(); avisoNumero();
   }
+  else if(STATE.tab==='autorizaciones') v.innerHTML=vistaAutorizaciones();
   else if(STATE.tab==='catalogos') v.innerHTML=vistaCatalogos();
   else if(STATE.tab==='estadisticas') v.innerHTML=vistaEstadisticas();
   else v.innerHTML=vistaLista();
@@ -460,6 +474,7 @@ function render(){
 function renderTabs(){
   const n=pendientes().length;
   const tabs=[['bandeja','Por atender'+(n?`<span class="badge">${n}</span>`:'')],['mias','Mis requisiciones']];
+  if(esAutorizador()) tabs.push(['autorizaciones','Autorizaciones'+(pendAut()?`<span class="badge">${pendAut()}</span>`:'')]);
   if(veTodo()) tabs.push(['todas','Todas']);
   if(tiene('SOLICITANTE')) tabs.push(['nueva','Nueva']);
   if(veTodo()) tabs.push(['catalogos','Proveedores y artículos'],['estadisticas','Estadísticas']);
@@ -503,7 +518,7 @@ function vistaLista(){
       <div class="rq-h"><span class="rq-n">${esc(r.consecutivo||'(sin número)')}</span>
         <span class="rq-a">${esc(r.area)}</span>
         <span class="pill ${esc(r.prioridad)}">${esc(r.prioridad)}</span>
-        ${r.estado==='Rechazada'||r.estado==='Recibida'?`<span class="pill ${esc(r.estado)}">${esc(r.estado)}</span>`:''}</div>
+        ${['Rechazada','Recibida','Cotizada','Autorizada'].indexOf(r.estado)>=0?`<span class="pill ${esc(r.estado)}">${esc(estTxt(r.estado))}</span>`:''}</div>
       <div class="rq-m">${esc(r.solicitante_nombre)} — ${fFecha(r.fecha_solicitud)} — ${its.length} artículo(s)${r.estado!=='Recibida'&&r.estado!=='Rechazada'?' — sigue: '+esc(siguientePaso(r)):''}</div>
       <div class="rq-items">${esc(its.map(i=>i.cant+' '+i.unidad+' '+i.articulo).join(' · '))}</div>
       ${railHTML(r,false)}
@@ -525,7 +540,7 @@ function vistaDetalle(id){
 
   const cab=`<div class="panel">
     <button class="back" onclick="irA(STATE.volverA||'bandeja')">← Volver</button>
-    <h2>${esc(r.consecutivo)} <span class="pill ${esc(r.prioridad)}">${esc(r.prioridad)}</span> <span class="pill ${esc(r.estado)}">${esc(r.estado)}</span></h2>
+    <h2>${esc(r.consecutivo)} <span class="pill ${esc(r.prioridad)}">${esc(r.prioridad)}</span> <span class="pill ${esc(r.estado)}">${esc(estTxt(r.estado))}</span></h2>
     ${railHTML(r,true)}
     <div class="grid" style="margin-top:14px">
       ${kv('Solicitante',esc(r.solicitante_nombre))}${kv('Área',esc(r.area))}${kv('Fecha de solicitud',fFecha(r.fecha_solicitud))}
@@ -534,7 +549,8 @@ function vistaDetalle(id){
       ${r.aprobador?kv(r.estado==='Rechazada'?'Rechazó':'Aprobó',esc(r.aprobador)+' — '+fFecha(r.fecha_aprobacion)):''}
       ${r.proveedor?kv('Proveedor',esc(r.proveedor)):''}
       ${r.n_cotizacion?kv('N° cotización',esc(r.n_cotizacion)):''}
-      ${r.valor_cotizado?kv('Valor cotizado',pesos(r.valor_cotizado)):''}
+      ${r.valor_cotizado?kv('Valor propuesto (sin IVA)',pesos(r.valor_cotizado)):''}
+      ${r.autorizado_por?kv(r.estado==='Rechazada'?'Rechazó la compra':'Autorizó la compra',esc(r.autorizado_por)+' — '+fFecha(r.fecha_autorizacion)):''}
       ${r.n_orden_compra?kv('OC / factura',esc(r.n_orden_compra)):''}
       ${r.valor_final?kv('Valor final',pesos(r.valor_final)+' — '+fFecha(r.fecha_compra)):''}
       ${r.fecha_recibido_total?kv('Recibida completa',fFecha(r.fecha_recibido_total)):''}
@@ -542,6 +558,8 @@ function vistaDetalle(id){
     ${r.justificacion?`<div class="kv" style="margin-top:10px"><div class="k">Justificación / observación general</div><div class="v" style="font-weight:500">${esc(r.justificacion)}</div></div>`:''}
     ${r.nota_clasificacion?`<div class="kv" style="margin-top:8px"><div class="k">Nota de clasificación</div><div class="v" style="font-weight:500">${esc(r.nota_clasificacion)}</div></div>`:''}
     ${r.nota_aprobacion?`<div class="kv" style="margin-top:8px"><div class="k">Nota de ${r.estado==='Rechazada'&&r.aprobador?'rechazo':'aprobación'}</div><div class="v" style="font-weight:500">${esc(r.nota_aprobacion)}</div></div>`:''}
+    ${r.motivo_devolucion&&r.estado==='Aprobada'?`<div class="warn-box" style="margin-top:8px"><b>Devuelta por autorización (${fFecha(r.fecha_devolucion)}):</b> ${esc(r.motivo_devolucion)}</div>`:''}
+    ${r.nota_autorizacion?`<div class="kv" style="margin-top:8px"><div class="k">Nota de ${r.estado==='Rechazada'?'rechazo de la compra':'autorización'}</div><div class="v" style="font-weight:500">${esc(r.nota_autorizacion)}</div></div>`:''}
     <div class="row-actions"><button class="btn sec sm" onclick="imprimirFP('${esc(id)}')">Imprimir / PDF FP-08-03</button></div>
   </div>`;
 
@@ -558,7 +576,7 @@ function vistaDetalle(id){
     <div class="t">${fFecha(h.timestamp)}${h.estado_nuevo&&h.estado_nuevo!==h.estado_anterior?' — '+esc(h.estado_anterior||'—')+' → '+esc(h.estado_nuevo):''}</div>
     ${h.nota?`<div>${esc(h.nota)}</div>`:''}</li>`).join('')||'<li>Sin movimientos registrados.</li>'}</ul></div>`;
 
-  return cab+acciones+tabla+hist;
+  return cab+ofertasPanel(r)+docsPanel(r)+acciones+tabla+hist;
 }
 
 function optsPrioridad(sel){ return (STATE.config?STATE.config.prioridades:['Baja','Normal','Alta','Urgente']).map(p=>`<option${p===sel?' selected':''}>${p}</option>`).join(''); }
@@ -580,15 +598,31 @@ function panelAccion(a,r,its){
     <div class="row-actions"><button class="btn ok" onclick="accDecidir('${id}',true)">Aprobar</button>
       <button class="btn bad" onclick="accDecidir('${id}',false)">Rechazar</button></div></div>`;
 
-  if(a==='cotizar') return `<div class="panel act"><h3>${r.estado==='Cotizada'?'Actualizar cotización':'Registrar cotización'}</h3>
-    <div class="grid"><div><label class="f">Proveedor (del maestro o uno nuevo)</label><input class="inp" id="coProv" list="dlProveedores" value="${esc(r.proveedor)}"></div>
-      <div><label class="f">N° cotización</label><input class="inp" id="coNum" value="${esc(r.n_cotizacion)}"></div></div>
+  if(a==='cotizar'){
+    const previas=ofertasDe(r.id_req), nDocsCot=docsDe(r.id_req).filter(d=>d.tipo==='Cotización').length;
+    return `<div class="panel act"><h3>${r.estado==='Cotizada'?'Actualizar cotización (antes de que se autorice)':'Registrar cotizaciones y enviar a autorización'}</h3>
+    ${r.motivo_devolucion&&r.estado==='Aprobada'?`<p class="warn-box"><b>Devuelta por autorización:</b> ${esc(r.motivo_devolucion)}</p>`:''}
+    <p class="rq-m">Adjunta antes los documentos (panel «Documentos de soporte»): un documento por cada oferta. Hoy tienes ${nDocsCot} cotización(es) adjunta(s). Mínimo ${cfgLista('min_cotizaciones',2)} ofertas, o justifica el proveedor único.</p>
     ${comparadorHTML(its)}
+    <div id="ofLista">${(previas.length?previas:[null,null]).map((o,i)=>ofertaHTML(o,i)).join('')}</div>
+    <div class="row-actions"><button class="btn sec sm" onclick="agregarOferta()">+ Agregar oferta</button></div>
     ${tablaPrecios('co',its)}
-    <div class="grid"><div><label class="f">Valor total cotizado (COP)</label><input class="inp" id="coVal" inputmode="numeric" value="${esc(r.valor_cotizado)}"></div>
-      <div><label class="f">Nota</label><input class="inp" id="coNota"></div></div>
+    <label class="f">Justificación de proveedor único (obligatoria si registras una sola oferta)</label><textarea class="inp" id="coUnico">${esc(r.proveedor_unico_just||'')}</textarea>
+    <label class="f">Si falta el documento de alguna cotización, explica por qué</label><textarea class="inp" id="coSinSop">${esc(r.sin_soporte_just||'')}</textarea>
+    <label class="f">Nota para quien autoriza</label><input class="inp" id="coNota">
     ${dlProveedores()}
-    <div class="row-actions"><button class="btn" onclick="accCotizar('${id}')">Guardar cotización</button></div></div>`;
+    <div class="row-actions"><button class="btn" onclick="accCotizar('${id}')">Enviar a autorización</button></div></div>`;
+  }
+
+  if(a==='autorizar'){
+    const nC=docsDe(r.id_req).filter(d=>d.tipo==='Cotización').length, nF=docsDe(r.id_req).filter(d=>d.tipo==='Ficha técnica').length;
+    return `<div class="panel act"><h3>Autorización de compra: ¿conviene la relación precio-beneficio?</h3>
+    <p class="rq-m">Revisa las cotizaciones comparadas y los documentos de arriba. Hay ${nC} cotización(es) y ${nF} ficha(s) técnica(s) adjuntas.</p>
+    <label class="f">Nota (obligatoria si devuelves o rechazas)</label><textarea class="inp" id="auNota"></textarea>
+    <div class="row-actions"><button class="btn ok" onclick="accAutorizar('${id}','autorizar')">Autorizar compra</button>
+      <button class="btn sec" onclick="accAutorizar('${id}','devolver')">Devolver a Compras</button>
+      <button class="btn bad" onclick="accAutorizar('${id}','rechazar')">Rechazar</button></div></div>`;
+  }
 
   if(a==='comprar') return `<div class="panel act"><h3>Registrar compra</h3>
     <div class="grid"><div><label class="f">Proveedor</label><input class="inp" id="cpProv" list="dlProveedores" value="${esc(r.proveedor)}"></div>
@@ -611,6 +645,151 @@ function panelAccion(a,r,its){
       <div class="row-actions"><button class="btn ok" onclick="accRecibir('${id}')">Registrar recibido</button></div></div>`;
   }
   return '';
+}
+
+// ================= v1.5: AUTORIZACIÓN DE COMPRA, OFERTAS Y DOCUMENTOS =================
+function cfgLista(k,def){ return (STATE.config&&STATE.config[k])||def; }
+function esAutorizador(){ return tiene('AUTORIZADOR_COMPRA_MTTO')||tiene('AUTORIZADOR_COMPRA_GENERAL'); }
+/** Mismas reglas del servidor: nadie autoriza lo que creó; Mantenimiento → su autorizador; resto → autorizador general. */
+function puedeAutorizar(r){
+  if(!STATE.usuario || r.solicitante_id===STATE.usuario.llave) return false;
+  if(esMtto(r)) return tiene('AUTORIZADOR_COMPRA_MTTO') || (tiene('AUTORIZADOR_COMPRA_GENERAL') && (STATE.autorizadoresMtto||[]).indexOf(r.solicitante_id)>=0);
+  return tiene('AUTORIZADOR_COMPRA_GENERAL');
+}
+function pendAut(){ return STATE.reqs.filter(r=>r.estado==='Cotizada' && puedeAutorizar(r)).length; }
+function estTxt(e){ return e==='Cotizada'?'Cotizada · por autorizar':e; }
+function ofertasDe(id){ return (STATE.cotizaciones||[]).filter(c=>c.id_req===id && c.vigente==='SI'); }
+function docsDe(id){ return (STATE.documentos||[]).filter(d=>d.id_req===id); }
+function tamDoc(n){ n=Number(n)||0; return n>=1048576?(n/1048576).toFixed(1).replace('.',',')+' MB':Math.max(1,Math.round(n/1024))+' KB'; }
+
+function ofertasPanel(r){
+  const of=ofertasDe(r.id_req); if(!of.length) return '';
+  const min=Math.min.apply(null,of.map(o=>Number(o.valor_sin_iva)||0));
+  const fila=o=>{ const v=Number(o.valor_sin_iva)||0, sel=o.seleccionada==='SI';
+    return `<tr${sel?' class="sel"':''}><td><b>${esc(o.proveedor)}</b>${sel?' <span class="pill Recibida">Propuesta</span>':''}${(v===min&&of.length>1)?' <span class="pill Autorizada">Menor valor</span>':''}
+      <div class="rq-m">${o.n_cotizacion?'Cotización '+esc(o.n_cotizacion):''}</div></td>
+      <td class="n">${pesos(v)}</td><td class="n">${Number(o.flete)?pesos(o.flete):'—'}</td>
+      <td>${o.pago==='Crédito'?'Crédito '+esc(o.plazo_credito_dias)+' días':'Contado'}</td><td>${esc(o.transporte)}</td>
+      <td>${o.plazo_entrega_dias?esc(o.plazo_entrega_dias)+' d':'—'}</td><td>${o.validez?fFecha(o.validez):'—'}</td></tr>`; };
+  return `<div class="panel"><h3>Cotizaciones comparadas <span class="rq-m">— valores sin IVA; el flete se muestra aparte y no se suma</span></h3>
+    <div class="tbl-wrap"><table class="fp"><thead><tr><th>Proveedor</th><th>Valor</th><th>Flete</th><th>Pago</th><th>Transporte</th><th>Entrega</th><th>Válida hasta</th></tr></thead><tbody>${of.map(fila).join('')}</tbody></table></div>
+    ${r.proveedor_unico_just?`<p class="rq-m"><b>Proveedor único, justificación:</b> ${esc(r.proveedor_unico_just)}</p>`:''}
+    ${r.sin_soporte_just?`<p class="rq-m"><b>Falta soporte documental, explicación:</b> ${esc(r.sin_soporte_just)}</p>`:''}
+    ${of.some(o=>o.nota)?`<p class="rq-m">${of.filter(o=>o.nota).map(o=>'<b>'+esc(o.proveedor)+':</b> '+esc(o.nota)).join(' · ')}</p>`:''}</div>`;
+}
+
+function docsPanel(r){
+  const ds=docsDe(r.id_req), yo=STATE.usuario, esC=tiene('COMPRAS')||tiene('ADMIN');
+  const puedeSubir=['Solicitada','Clasificada','Aprobada','Cotizada'].indexOf(r.estado)>=0 && (esC||r.solicitante_id===yo.llave);
+  if(!ds.length && !puedeSubir) return '';
+  const tipos=esC?['Cotización','Ficha técnica','Otro']:['Ficha técnica','Otro'];
+  const fila=d=>`<div class="doc"><div><b>${esc(d.tipo)}</b>${d.proveedor?' — '+esc(d.proveedor):''}<div class="rq-m">${esc(d.nombre)} · ${tamDoc(d.tamano)} · ${esc(d.subido_por)} · ${fFecha(d.fecha)}</div></div>
+    <div class="row-actions" style="margin:0"><button class="btn sec sm" onclick="verDoc('${esc(d.id_doc)}')">Ver</button>
+    ${puedeSubir&&(esC||d.subido_por===yo.nombre)?`<button class="btn sec sm" onclick="quitarDoc('${esc(r.id_req)}','${esc(d.id_doc)}')">Quitar</button>`:''}</div></div>`;
+  return `<div class="panel"><h3>Documentos de soporte</h3>${ds.map(fila).join('')||'<p class="rq-m">Aún no hay documentos adjuntos.</p>'}
+    ${puedeSubir?`<div class="up"><div class="grid"><div><label class="f">Tipo</label><select class="inp" id="dcTipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <div><label class="f">Proveedor (si es una cotización)</label><input class="inp" id="dcProv" list="dlProvDoc" placeholder="Opcional"></div></div>
+      <label class="f">Archivo: PDF, JPG o PNG, máximo ${cfgLista('max_doc_mb',5)} MB (las fotos se reducen solas)</label>
+      <input class="inp" id="dcFile" type="file" accept="application/pdf,image/*">
+      <datalist id="dlProvDoc">${(STATE.proveedores||[]).filter(p=>p.estado!=='INACTIVO').map(p=>`<option value="${esc(p.razon_social)}">`).join('')}</datalist>
+      <div class="row-actions"><button class="btn sec" onclick="accSubirDoc('${esc(r.id_req)}')">Adjuntar documento</button></div></div>`:''}</div>`;
+}
+
+function aBase64(blob){ return new Promise((ok,ko)=>{ const fr=new FileReader(); fr.onload=()=>ok(String(fr.result).split(',')[1]); fr.onerror=()=>ko(new Error('No se pudo leer el archivo')); fr.readAsDataURL(blob); }); }
+async function prepararArchivo(f){
+  const MAX=cfgLista('max_doc_mb',5)*1048576;
+  if(f.type==='application/pdf'){
+    if(f.size>MAX) throw new Error('El PDF supera '+cfgLista('max_doc_mb',5)+' MB. Comprímelo o adjunta una foto.');
+    return {mime:f.type, nombre:f.name, datos:await aBase64(f)};
+  }
+  if(/^image\//.test(f.type)){
+    let bmp; try{ bmp=await createImageBitmap(f); }catch(e){ throw new Error('No se pudo procesar la imagen. Usa JPG o PNG.'); }
+    const k=Math.min(1,1800/Math.max(bmp.width,bmp.height));
+    const c=document.createElement('canvas'); c.width=Math.round(bmp.width*k); c.height=Math.round(bmp.height*k);
+    const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); g.drawImage(bmp,0,0,c.width,c.height);
+    const b=await new Promise(res=>c.toBlob(res,'image/jpeg',0.82));
+    if(!b||b.size>MAX) throw new Error('La imagen sigue superando '+cfgLista('max_doc_mb',5)+' MB.');
+    return {mime:'image/jpeg', nombre:f.name.replace(/\.[^.]+$/,'')+'.jpg', datos:await aBase64(b)};
+  }
+  throw new Error('Solo se aceptan PDF, JPG o PNG.');
+}
+async function accSubirDoc(id){
+  const f=($('dcFile')||{}).files&&$('dcFile').files[0], tipo=$('dcTipo').value, proveedor=($('dcProv')||{}).value||'';
+  if(!f){ toast('Elige el archivo.','err'); return; }
+  let arch; try{ arch=await prepararArchivo(f); }catch(e){ toast(e.message,'err'); return; }
+  const antes=docsDe(id).length;
+  await enviarYConfirmar({accion:'subirDoc',id_req:id,tipo,proveedor,nombre:arch.nombre,mime:arch.mime,datos:arch.datos},
+    ()=>docsDe(id).length>antes, 'Documento adjuntado', 14);
+}
+async function quitarDoc(idReq,idDoc){
+  if(!confirm('¿Retirar este documento?')) return;
+  await enviarYConfirmar({accion:'quitarDoc',id_doc:idDoc}, ()=>!docsDe(idReq).some(d=>d.id_doc===idDoc), 'Documento retirado');
+}
+async function verDoc(idDoc){
+  document.body.classList.add('loading');
+  try{
+    const j=await leerGAS({accion:'documento',id_doc:idDoc,correo:STATE.correo,h:STATE.h});
+    const bin=atob(j.datos), u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+    const url=URL.createObjectURL(new Blob([u8],{type:j.mime}));
+    modal(`<h3>${esc(j.nombre)}</h3>${j.mime==='application/pdf'
+      ?`<iframe src="${url}" title="${esc(j.nombre)}" style="width:100%;height:65vh;border:1px solid var(--line);border-radius:8px"></iframe>`
+      :`<img src="${url}" alt="${esc(j.nombre)}" style="max-width:100%;border-radius:8px">`}
+      <div class="row-actions"><a class="btn sec" href="${url}" download="${esc(j.nombre)}">Descargar</a><button class="btn sec" onclick="cerrarModal()">Cerrar</button></div>`);
+  }catch(e){ toast('No se pudo abrir el documento: '+e.message,'err'); }
+  finally{ document.body.classList.remove('loading'); }
+}
+
+// ---- ofertas (Compras)
+function ofertaHTML(o,i){
+  o=o||{};
+  return `<div class="ofer"><div class="ofer-h"><b>Oferta ${i+1}</b>
+    <label class="radio"><input type="radio" name="ofSel" class="ofSel"${o.seleccionada==='SI'?' checked':''}> Proponer esta</label>
+    <button class="btn sec sm" onclick="this.closest('.ofer').remove()">Quitar</button></div>
+    <div class="grid">
+      <div><label class="f">Proveedor</label><input class="inp ofProv" list="dlProveedores" value="${esc(o.proveedor||'')}" onchange="ofProvCambio(this)"></div>
+      <div><label class="f">N° cotización</label><input class="inp ofNum" value="${esc(o.n_cotizacion||'')}"></div>
+      <div><label class="f">Valor sin IVA (COP)</label><input class="inp ofVal" inputmode="numeric" value="${esc(o.valor_sin_iva||'')}"></div>
+      <div><label class="f">Flete aparte (COP)</label><input class="inp ofFle" inputmode="numeric" value="${esc(o.flete&&o.flete!=='0'?o.flete:'')}"></div>
+      <div><label class="f">Pago</label><select class="inp ofPago" onchange="ofPagoCambio(this)">${cfgLista('pagos',['Contado','Crédito']).map(p=>`<option${(o.pago||'Contado')===p?' selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="ofPlzBox${o.pago==='Crédito'?'':' hidden'}"><label class="f">Plazo de crédito (días)</label><input class="inp ofPlz" inputmode="numeric" value="${esc(o.plazo_credito_dias||'')}"></div>
+      <div><label class="f">Transporte</label><select class="inp ofTra"><option value="">Elige…</option>${cfgLista('transportes',['Entrega en planta','Recoge la empresa','Flete aparte']).map(t=>`<option${o.transporte===t?' selected':''}>${t}</option>`).join('')}</select></div>
+      <div><label class="f">Entrega (días)</label><input class="inp ofEnt" inputmode="numeric" value="${esc(o.plazo_entrega_dias&&o.plazo_entrega_dias!=='0'?o.plazo_entrega_dias:'')}"></div>
+      <div><label class="f">Válida hasta</label><input class="inp ofVig" type="date" value="${esc(o.validez||'')}"></div>
+      <div><label class="f">Nota</label><input class="inp ofNota" value="${esc(o.nota||'')}"></div>
+    </div></div>`;
+}
+function agregarOferta(){ const c=$('ofLista'); c.insertAdjacentHTML('beforeend',ofertaHTML(null,c.children.length)); }
+function ofertaSeleccionada(){ const s=document.querySelector('.ofSel:checked'); return s?s.closest('.ofer'):null; }
+function ofPagoCambio(sel){ sel.closest('.ofer').querySelector('.ofPlzBox').classList.toggle('hidden',sel.value!=='Crédito'); }
+function ofProvCambio(inp){
+  const p=STATE.proveedores.find(x=>normTxt(x.razon_social)===normTxt(inp.value)); if(!p) return;
+  const b=inp.closest('.ofer');
+  if(p.credito==='SI'){ const pg=b.querySelector('.ofPago'); pg.value='Crédito'; ofPagoCambio(pg); if(p.plazo_credito_dias && !b.querySelector('.ofPlz').value) b.querySelector('.ofPlz').value=p.plazo_credito_dias; }
+  if(cfgLista('transportes',[]).indexOf(p.transporte_habitual)>=0 && !b.querySelector('.ofTra').value) b.querySelector('.ofTra').value=p.transporte_habitual;
+}
+function leerOfertas(){
+  return [...document.querySelectorAll('#ofLista .ofer')].map(b=>{
+    const prov=b.querySelector('.ofProv').value.trim(), p=STATE.proveedores.find(x=>normTxt(x.razon_social)===normTxt(prov));
+    const num=k=>b.querySelector(k).value.replace(/[^\d]/g,'');
+    return {proveedor:prov, id_proveedor:p?p.id_proveedor:'', n_cotizacion:b.querySelector('.ofNum').value.trim(), valor:num('.ofVal'), flete:num('.ofFle'),
+      pago:b.querySelector('.ofPago').value, plazo_credito_dias:num('.ofPlz'), transporte:b.querySelector('.ofTra').value, plazo_entrega_dias:num('.ofEnt'),
+      validez:b.querySelector('.ofVig').value, nota:b.querySelector('.ofNota').value.trim(), seleccionada:b.querySelector('.ofSel').checked};
+  }).filter(o=>o.proveedor);
+}
+
+function vistaAutorizaciones(){
+  const pend=STATE.reqs.filter(r=>r.estado==='Cotizada' && puedeAutorizar(r));
+  const otras=STATE.reqs.filter(r=>r.estado==='Cotizada' && !puedeAutorizar(r));
+  const hechas=STATE.reqs.filter(r=>r.autorizado_por && r.estado!=='Cotizada').sort((a,b)=>String(b.fecha_autorizacion).localeCompare(String(a.fecha_autorizacion))).slice(0,15);
+  const tarjeta=r=>{ const n=ofertasDe(r.id_req).length;
+    return `<div class="rq p-${esc(r.prioridad)}" onclick="abrirDetalle('${esc(r.id_req)}')" tabindex="0" onkeydown="if(event.key==='Enter')abrirDetalle('${esc(r.id_req)}')">
+      <div class="rq-h"><span class="rq-n">${esc(r.consecutivo)}</span><span class="rq-a">${esc(r.area)}</span><span class="pill ${esc(r.prioridad)}">${esc(r.prioridad)}</span>
+        <span class="pill ${esc(r.estado)}">${esc(estTxt(r.estado))}</span></div>
+      <div class="rq-m">${esc(r.solicitante_nombre)} — propuesta: ${esc(r.proveedor||'—')} ${r.valor_cotizado?pesos(r.valor_cotizado):''}${n?' — '+n+' oferta(s)':''}${r.autorizado_por?' — decidió: '+esc(r.autorizado_por):''}</div>
+      <div class="rq-items">${esc(itemsDe(r.id_req).map(i=>i.cant+' '+i.unidad+' '+i.articulo).join(' · '))}</div></div>`; };
+  return `<h3 style="margin:4px 0 10px">Por autorizar (${pend.length})</h3>${pend.map(tarjeta).join('')||'<div class="empty">No hay compras pendientes de tu autorización.</div>'}
+    ${otras.length?`<h3 style="margin:16px 0 10px">Pendientes de otro autorizador (${otras.length})</h3>${otras.map(tarjeta).join('')}`:''}
+    <h3 style="margin:16px 0 10px">Decididas recientemente</h3>${hechas.map(tarjeta).join('')||'<div class="empty">Aún no hay decisiones.</div>'}`;
 }
 
 // ================= ACCIONES =================
@@ -636,14 +815,31 @@ async function accDecidir(id, aprobar){
 }
 
 async function accCotizar(id){
-  const proveedor=$('coProv').value.trim(), n_cotizacion=$('coNum').value.trim(), valor=$('coVal').value.replace(/[^\d]/g,''), nota=$('coNota').value.trim();
-  if(!proveedor){ toast('Falta el proveedor.','err'); return; }
-  if(!valor){ toast('Falta el valor cotizado (o los valores unitarios).','err'); return; }
-  const prov=STATE.proveedores.find(p=>normTxt(p.razon_social)===normTxt(proveedor));
-  if(!prov && !confirm('“'+proveedor+'” no está en el maestro de proveedores. ¿Crearlo al guardar?')) return;
-  await enviarYConfirmar({accion:'cotizar',id_req:id,proveedor,id_proveedor:prov?prov.id_proveedor:'',n_cotizacion,valor_cotizado:valor,nota,precios:leerPrecios('co')},
-    ()=>{ const r=reqActual(id); return r.estado==='Cotizada' && normTxt(r.proveedor)===normTxt(proveedor) && String(r.valor_cotizado)===String(Number(valor)); },
-    'Cotización guardada');
+  const ofertas=leerOfertas(), min=cfgLista('min_cotizaciones',2);
+  const unico=$('coUnico').value.trim(), sinSop=$('coSinSop').value.trim(), nota=$('coNota').value.trim();
+  if(!ofertas.length){ toast('Registra al menos una oferta.','err'); return; }
+  if(ofertas.some(o=>!o.valor)){ toast('Falta el valor de una oferta.','err'); return; }
+  if(ofertas.some(o=>!o.transporte)){ toast('Indica el transporte de cada oferta.','err'); return; }
+  if(ofertas.some(o=>o.pago==='Crédito'&&!o.plazo_credito_dias)){ toast('Indica el plazo de crédito de la oferta a crédito.','err'); return; }
+  if(ofertas.filter(o=>o.seleccionada).length!==1){ toast('Marca la oferta que propones (solo una).','err'); return; }
+  if(ofertas.length<min && !unico){ toast('Registra al menos '+min+' ofertas o justifica el proveedor único.','err'); return; }
+  const nDocs=docsDe(id).filter(d=>d.tipo==='Cotización').length;
+  if(nDocs<ofertas.length && !sinSop){ toast('Adjunta el documento de cada cotización ('+nDocs+' de '+ofertas.length+') o explica por qué no hay soporte.','err'); return; }
+  const nuevos=ofertas.filter(o=>!STATE.proveedores.find(p=>normTxt(p.razon_social)===normTxt(o.proveedor))).map(o=>o.proveedor);
+  if(nuevos.length && !confirm('No están en el maestro de proveedores: '+nuevos.join(', ')+'. ¿Crearlos al guardar?')) return;
+  const prop=ofertas.find(o=>o.seleccionada), antes=reqActual(id).fecha_cotizacion||'';
+  await enviarYConfirmar({accion:'cotizar',id_req:id,ofertas,proveedor_unico_just:unico,sin_soporte_just:sinSop,nota,precios:leerPrecios('co')},
+    ()=>{ const r=reqActual(id); return r.estado==='Cotizada' && r.fecha_cotizacion!==antes && normTxt(r.proveedor)===normTxt(prop.proveedor); },
+    'Cotización enviada a autorización', 8);
+}
+
+async function accAutorizar(id, decision){
+  const nota=$('auNota').value.trim();
+  if(decision!=='autorizar' && !nota){ toast('Escribe el motivo.','err'); return; }
+  if(decision==='rechazar' && !confirm('¿Rechazar esta compra definitivamente?')) return;
+  const esperado={autorizar:'Autorizada',devolver:'Aprobada',rechazar:'Rechazada'}[decision];
+  await enviarYConfirmar({accion:'autorizar',id_req:id,decision,nota}, ()=>reqActual(id).estado===esperado,
+    {autorizar:'Compra autorizada',devolver:'Devuelta a Compras',rechazar:'Compra rechazada'}[decision]);
 }
 
 async function accComprar(id){
@@ -888,7 +1084,8 @@ function comparadorHTML(its){
 }
 function usarRef(pref, prov){
   const r=STATE.detalle?reqActual(STATE.detalle):null; if(!r||!r.id_req) return;
-  const inpProv=$(pref==='co'?'coProv':'cpProv'); if(inpProv) inpProv.value=prov;
+  const so=pref==='co'?(ofertaSeleccionada()||document.querySelector('#ofLista .ofer')):null;
+  const inpProv=pref==='co'?(so&&so.querySelector('.ofProv')):$('cpProv'); if(inpProv){ inpProv.value=prov; if(pref==='co') ofProvCambio(inpProv); }
   let n=0, omit=0;
   itemsDe(r.id_req).forEach(i=>{
     const x=preciosDe(i.codigo_articulo).filter(z=>z.ok && z.proveedor===prov)[0]; if(!x) return;
@@ -1051,7 +1248,8 @@ function recalcPrecios(pref){
     const sub=document.querySelector(`.${pref}Sub[data-n="${inp.dataset.n}"]`);
     if(vu){ alguno=true; total+=Math.round(vu*c); if(sub) sub.textContent=pesos(Math.round(vu*c)); } else if(sub) sub.textContent='—';
   });
-  const tot=$(pref==='co'?'coVal':'cpVal'); if(alguno && tot) tot.value=String(total);
+  const so=pref==='co'?ofertaSeleccionada():null;
+  const tot=pref==='co'?(so&&so.querySelector('.ofVal')):$('cpVal'); if(alguno && tot) tot.value=String(total);
 }
 function leerPrecios(pref){
   return [...document.querySelectorAll('.'+pref+'Pu')].filter(i=>i.value.replace(/[^\d]/g,'')).map(i=>({n_item:i.dataset.n,valor_unitario:i.value.replace(/[^\d]/g,'')}));
@@ -1097,12 +1295,15 @@ function modalProveedor(id){
     ${campo('razon_social','Razón social')}${campo('nit','NIT')}${campo('contacto','Contacto')}${campo('telefono','Teléfono')}
     ${campo('correo','Correo')}${campo('ciudad','Ciudad')}${campo('categorias','Categorías que suministra','Ej.: Rodamientos, Eléctricos')}
     ${campo('condiciones_pago','Condiciones de pago','Ej.: Contado, 30 días')}${campo('observaciones','Observaciones')}
+    <label class="f">Crédito vigente con este proveedor</label><select class="inp" id="pv_credito"><option value=""${!p.credito?' selected':''}>Sin dato</option><option value="SI"${p.credito==='SI'?' selected':''}>Sí</option><option value="NO"${p.credito==='NO'?' selected':''}>No</option></select>
+    ${campo('plazo_credito_dias','Plazo de crédito (días)','Ej.: 30')}
+    <label class="f">Transporte habitual</label><select class="inp" id="pv_transporte_habitual"><option value="">Sin dato</option>${['Entrega en planta','Recoge la empresa','Flete aparte','Varía'].map(t=>`<option${p.transporte_habitual===t?' selected':''}>${t}</option>`).join('')}</select>
     <label class="f">Estado</label><select class="inp" id="pv_estado"><option${p.estado!=='INACTIVO'?' selected':''}>ACTIVO</option><option${p.estado==='INACTIVO'?' selected':''}>INACTIVO</option></select>
     <div class="row-actions"><button class="btn" onclick="guardarProveedor()">Guardar proveedor</button><button class="btn sec" onclick="cerrarModal()">Cancelar</button></div>`);
 }
 async function guardarProveedor(){
   const id=$('pv_id').value, d={id_proveedor:id};
-  ['razon_social','nit','contacto','telefono','correo','ciudad','categorias','condiciones_pago','observaciones'].forEach(k=>d[k]=$('pv_'+k).value.trim());
+  ['razon_social','nit','contacto','telefono','correo','ciudad','categorias','condiciones_pago','observaciones','credito','plazo_credito_dias','transporte_habitual'].forEach(k=>d[k]=$('pv_'+k).value.trim());
   d.estado=$('pv_estado').value;
   if(!d.razon_social){ toast('Falta la razón social.','err'); return; }
   const ok=await enviarYConfirmar({accion:'guardarProveedor',proveedor:d},
@@ -1163,6 +1364,8 @@ function vistaEstadisticas(){
   const tAprob=prom(reqs.filter(r=>r.fecha_aprobacion&&r.estado!=='Rechazada').map(r=>dias(r.fecha_solicitud,r.fecha_aprobacion)));
   const tCompra=prom(reqs.filter(r=>r.fecha_compra&&r.fecha_aprobacion).map(r=>dias(r.fecha_aprobacion.slice(0,10),r.fecha_compra)));
   const tCiclo=prom(reqs.filter(r=>r.fecha_recibido_total).map(r=>dias(r.fecha_solicitud,r.fecha_recibido_total)));
+  const tAut=prom(reqs.filter(r=>r.fecha_cotizacion&&r.fecha_autorizacion&&r.estado!=='Rechazada').map(r=>dias(r.fecha_cotizacion,r.fecha_autorizacion)));
+  const tAutCompra=prom(reqs.filter(r=>r.fecha_autorizacion&&r.fecha_compra).map(r=>dias(r.fecha_autorizacion.slice(0,10),r.fecha_compra)));
 
   const selector=`<div class="toolbar"><select class="inp" onchange="STATE.estPeriodo=this.value;render()">
       <option value="">Todo el histórico</option>
@@ -1178,11 +1381,13 @@ function vistaEstadisticas(){
     <div class="kpi gasto"><div class="n">${pesos(gasto)}</div><div class="l">Valor comprado</div></div>
     <div class="kpi"><div class="n">${fDias(tAprob)}</div><div class="l">Solicitud → aprobación</div></div>
     <div class="kpi"><div class="n">${fDias(tCompra)}</div><div class="l">Aprobación → compra</div></div>
+    <div class="kpi"><div class="n">${fDias(tAut)}</div><div class="l">Cotización → autorización</div></div>
+    <div class="kpi"><div class="n">${fDias(tAutCompra)}</div><div class="l">Autorización → compra</div></div>
     <div class="kpi"><div class="n">${fDias(tCiclo)}</div><div class="l">Ciclo total hasta recibido</div></div>
   </div>`;
 
   const porArea=agrupar(reqs,r=>r.area,r=>esGasto(r.estado)?Number(r.valor_final||0):0).sort((a,b)=>b.n-a.n);
-  const porEstado=['Solicitada','Clasificada','Aprobada','Cotizada','Comprada','Recibida','Rechazada'].map(e=>({k:e,n:reqs.filter(r=>r.estado===e).length})).filter(x=>x.n);
+  const porEstado=['Solicitada','Clasificada','Aprobada','Cotizada','Autorizada','Comprada','Recibida','Rechazada'].map(e=>({k:e,n:reqs.filter(r=>r.estado===e).length})).filter(x=>x.n);
   const porProv=agrupar(comprados,r=>r.proveedor,r=>Number(r.valor_final||0)).sort((a,b)=>b.v-a.v).slice(0,15);
   const porMes=agrupar(reqs,r=>String(r.fecha_solicitud).slice(0,7),r=>esGasto(r.estado)?Number(r.valor_final||0):0).sort((a,b)=>b.k.localeCompare(a.k)).slice(0,12);
   const artM={};
