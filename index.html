@@ -252,13 +252,14 @@ footer.ver{text-align:center;color:var(--muted);font-size:.78rem;padding:10px 0 
 
 <script>
 // ================= CONFIG =================
-const APP_VERSION = '1.5';
+const APP_VERSION = '1.6';
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwprFkXpqGwNORgmXh-qXSxgCieiO1n07A95TqFaB_kCyju4T7d-ZsNQvbZHy42uIhV/exec';
 const SESION_KEY = 'rqpostecsa_sesion_v1';
 const ETAPAS = ['Solicitada','Clasificada','Aprobada','Cotizada','Autorizada','Comprada','Recibida'];
 const ROL_TXT = {SOLICITANTE:'Solicitante',CLASIFICADOR_MTTO:'Clasifica Mantenimiento',APROBADOR_MTTO:'Aprueba Mantenimiento',
   APROBADOR_GENERAL:'Aprueba otras áreas',AUTORIZADOR_COMPRA_MTTO:'Autoriza compras de Mantenimiento',
-  AUTORIZADOR_COMPRA_GENERAL:'Autoriza compras de otras áreas',COMPRAS:'Compras',ADMIN:'Administrador'};
+  AUTORIZADOR_COMPRA_GENERAL:'Autoriza compras de otras áreas',
+  GERENCIA:'Gerencia: autoriza compras grandes o escaladas; recibe aviso de las demás',COMPRAS:'Compras',ADMIN:'Administrador'};
 
 // ================= ESTADO =================
 const STATE = { correo:'', h:'', usuario:null, config:null, reqs:[], items:[], historial:[], usuarios:[], articulos:[], proveedores:[], precios:[],
@@ -280,7 +281,7 @@ function pesos(v){ const n=Number(String(v||'').replace(/[^\d.]/g,'')); return n
 function fFecha(s){ if(!s) return '—'; const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}:\d{2}))?/); return m? `${m[3]}/${m[2]}/${m[1]}${m[4]?' '+m[4]:''}` : s; }
 function hoyISO(){ const d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,10); }
 function tiene(rol){ return !!(STATE.usuario && STATE.usuario.roles.indexOf(rol)>=0); }
-function veTodo(){ return ['CLASIFICADOR_MTTO','APROBADOR_MTTO','APROBADOR_GENERAL','AUTORIZADOR_COMPRA_MTTO','AUTORIZADOR_COMPRA_GENERAL','COMPRAS','ADMIN'].some(tiene); }
+function veTodo(){ return ['CLASIFICADOR_MTTO','APROBADOR_MTTO','APROBADOR_GENERAL','AUTORIZADOR_COMPRA_MTTO','AUTORIZADOR_COMPRA_GENERAL','GERENCIA','COMPRAS','ADMIN'].some(tiene); }
 function nuevoId(){ return 'R'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,6).toUpperCase(); }
 function togglePin(b){ const i=b.previousElementSibling; i.type=i.type==='password'?'text':'password'; b.textContent=i.type==='password'?'VER':'OCULTAR'; }
 
@@ -401,7 +402,7 @@ async function cargarDatos(silencioso){
     STATE.usuario=j.usuario; STATE.config=j.config;
     STATE.reqs=j.reqs||[]; STATE.items=j.items||[]; STATE.historial=j.historial||[]; STATE.usuarios=j.usuarios||[];
     STATE.articulos=j.articulos||[]; STATE.proveedores=j.proveedores||[]; STATE.precios=j.precios||[]; STATE.numerosUsados=j.numeros_usados||[];
-    STATE.documentos=j.documentos||[]; STATE.cotizaciones=j.cotizaciones||[]; STATE.autorizadoresMtto=j.autorizadores_mtto||[];
+    STATE.documentos=j.documentos||[]; STATE.cotizaciones=j.cotizaciones||[]; STATE.autorizables=j.autorizables||[]; STATE.exigenGerencia=j.exigen_gerencia||[];
     STATE.reqs.sort((a,b)=>String(b.fecha_solicitud).localeCompare(String(a.fecha_solicitud)));
     if(!silencioso){ render(); }
   }catch(e){
@@ -518,7 +519,7 @@ function vistaLista(){
       <div class="rq-h"><span class="rq-n">${esc(r.consecutivo||'(sin número)')}</span>
         <span class="rq-a">${esc(r.area)}</span>
         <span class="pill ${esc(r.prioridad)}">${esc(r.prioridad)}</span>
-        ${['Rechazada','Recibida','Cotizada','Autorizada'].indexOf(r.estado)>=0?`<span class="pill ${esc(r.estado)}">${esc(estTxt(r.estado))}</span>`:''}</div>
+        ${['Rechazada','Recibida','Cotizada','Autorizada'].indexOf(r.estado)>=0?`<span class="pill ${esc(r.estado)}">${esc(estTxt(r.estado))}</span>`:''}${r.estado==='Cotizada'&&exigeGer(r)?' <span class="pill Cotizada">Gerencia</span>':''}</div>
       <div class="rq-m">${esc(r.solicitante_nombre)} — ${fFecha(r.fecha_solicitud)} — ${its.length} artículo(s)${r.estado!=='Recibida'&&r.estado!=='Rechazada'?' — sigue: '+esc(siguientePaso(r)):''}</div>
       <div class="rq-items">${esc(its.map(i=>i.cant+' '+i.unidad+' '+i.articulo).join(' · '))}</div>
       ${railHTML(r,false)}
@@ -551,6 +552,7 @@ function vistaDetalle(id){
       ${r.n_cotizacion?kv('N° cotización',esc(r.n_cotizacion)):''}
       ${r.valor_cotizado?kv('Valor propuesto (sin IVA)',pesos(r.valor_cotizado)):''}
       ${r.autorizado_por?kv(r.estado==='Rechazada'?'Rechazó la compra':'Autorizó la compra',esc(r.autorizado_por)+' — '+fFecha(r.fecha_autorizacion)):''}
+      ${(r.estado==='Cotizada'&&exigeGer(r))||r.requiere_gerencia==='SI'?kv('Le corresponde a Gerencia',esc(motivoGer(r))):''}
       ${r.n_orden_compra?kv('OC / factura',esc(r.n_orden_compra)):''}
       ${r.valor_final?kv('Valor final',pesos(r.valor_final)+' — '+fFecha(r.fecha_compra)):''}
       ${r.fecha_recibido_total?kv('Recibida completa',fFecha(r.fecha_recibido_total)):''}
@@ -599,15 +601,16 @@ function panelAccion(a,r,its){
       <button class="btn bad" onclick="accDecidir('${id}',false)">Rechazar</button></div></div>`;
 
   if(a==='cotizar'){
-    const previas=ofertasDe(r.id_req), nDocsCot=docsDe(r.id_req).filter(d=>d.tipo==='Cotización').length;
+    const previas=ofertasDe(r.id_req), nDocsCot=docsDe(r.id_req).filter(d=>d.tipo==='Cotización').length; setTimeout(evalGer,60);
     return `<div class="panel act"><h3>${r.estado==='Cotizada'?'Actualizar cotización (antes de que se autorice)':'Registrar cotizaciones y enviar a autorización'}</h3>
     ${r.motivo_devolucion&&r.estado==='Aprobada'?`<p class="warn-box"><b>Devuelta por autorización:</b> ${esc(r.motivo_devolucion)}</p>`:''}
-    <p class="rq-m">Adjunta antes los documentos (panel «Documentos de soporte»): un documento por cada oferta. Hoy tienes ${nDocsCot} cotización(es) adjunta(s). Mínimo ${cfgLista('min_cotizaciones',2)} ofertas, o justifica el proveedor único.</p>
+    <p class="rq-m">Adjunta antes los documentos (panel «Documentos de soporte»): un documento por cada oferta. Hoy tienes ${nDocsCot} cotización(es) adjunta(s). Mínimo ${cfgLista('min_cotizaciones',2)} ofertas, o justifica el proveedor único. La autoriza Gerencia si la oferta propuesta supera ${pesos(cfgLista('umbral_gerencia',3000000))} (el flete solo cuenta si es importación), si el crédito pasa de ${cfgLista('plazo_gerencia',15)} días o si hay proveedor único.</p>
     ${comparadorHTML(its)}
-    <div id="ofLista">${(previas.length?previas:[null,null]).map((o,i)=>ofertaHTML(o,i)).join('')}</div>
+    <div id="ofLista" oninput="evalGer()" onchange="evalGer()">${(previas.length?previas:[null,null]).map((o,i)=>ofertaHTML(o,i)).join('')}</div>
+    <div id="gerInfo" class="warn-box hidden"></div>
     <div class="row-actions"><button class="btn sec sm" onclick="agregarOferta()">+ Agregar oferta</button></div>
     ${tablaPrecios('co',its)}
-    <label class="f">Justificación de proveedor único (obligatoria si registras una sola oferta)</label><textarea class="inp" id="coUnico">${esc(r.proveedor_unico_just||'')}</textarea>
+    <label class="f">Justificación de proveedor único (obligatoria si registras una sola oferta)</label><textarea class="inp" id="coUnico" oninput="evalGer()">${esc(r.proveedor_unico_just||'')}</textarea>
     <label class="f">Si falta el documento de alguna cotización, explica por qué</label><textarea class="inp" id="coSinSop">${esc(r.sin_soporte_just||'')}</textarea>
     <label class="f">Nota para quien autoriza</label><input class="inp" id="coNota">
     ${dlProveedores()}
@@ -617,11 +620,13 @@ function panelAccion(a,r,its){
   if(a==='autorizar'){
     const nC=docsDe(r.id_req).filter(d=>d.tipo==='Cotización').length, nF=docsDe(r.id_req).filter(d=>d.tipo==='Ficha técnica').length;
     return `<div class="panel act"><h3>Autorización de compra: ¿conviene la relación precio-beneficio?</h3>
+    ${exigeGer(r)?`<p class="warn-box"><b>Le corresponde a Gerencia:</b> ${esc(motivoGer(r))}</p>`:''}
     <p class="rq-m">Revisa las cotizaciones comparadas y los documentos de arriba. Hay ${nC} cotización(es) y ${nF} ficha(s) técnica(s) adjuntas.</p>
-    <label class="f">Nota (obligatoria si devuelves o rechazas)</label><textarea class="inp" id="auNota"></textarea>
+    <label class="f">Nota (obligatoria si devuelves, rechazas o escalas a Gerencia)</label><textarea class="inp" id="auNota"></textarea>
     <div class="row-actions"><button class="btn ok" onclick="accAutorizar('${id}','autorizar')">Autorizar compra</button>
       <button class="btn sec" onclick="accAutorizar('${id}','devolver')">Devolver a Compras</button>
-      <button class="btn bad" onclick="accAutorizar('${id}','rechazar')">Rechazar</button></div></div>`;
+      <button class="btn bad" onclick="accAutorizar('${id}','rechazar')">Rechazar</button>
+      ${!exigeGer(r)&&!tiene('GERENCIA')?`<button class="btn sec" onclick="accEscalar('${id}')">Escalar a Gerencia</button>`:''}</div></div>`;
   }
 
   if(a==='comprar') return `<div class="panel act"><h3>Registrar compra</h3>
@@ -649,12 +654,24 @@ function panelAccion(a,r,its){
 
 // ================= v1.5: AUTORIZACIÓN DE COMPRA, OFERTAS Y DOCUMENTOS =================
 function cfgLista(k,def){ return (STATE.config&&STATE.config[k])||def; }
-function esAutorizador(){ return tiene('AUTORIZADOR_COMPRA_MTTO')||tiene('AUTORIZADOR_COMPRA_GENERAL'); }
-/** Mismas reglas del servidor: nadie autoriza lo que creó; Mantenimiento → su autorizador; resto → autorizador general. */
-function puedeAutorizar(r){
-  if(!STATE.usuario || r.solicitante_id===STATE.usuario.llave) return false;
-  if(esMtto(r)) return tiene('AUTORIZADOR_COMPRA_MTTO') || (tiene('AUTORIZADOR_COMPRA_GENERAL') && (STATE.autorizadoresMtto||[]).indexOf(r.solicitante_id)>=0);
-  return tiene('AUTORIZADOR_COMPRA_GENERAL');
+function esAutorizador(){ return tiene('AUTORIZADOR_COMPRA_MTTO')||tiene('AUTORIZADOR_COMPRA_GENERAL')||tiene('GERENCIA'); }
+/** Las reglas de quién autoriza viven solo en el servidor; aquí se lee qué puede autorizar esta persona. */
+function puedeAutorizar(r){ return (STATE.autorizables||[]).indexOf(r.id_req)>=0; }
+function exigeGer(r){ return (STATE.exigenGerencia||[]).indexOf(r.id_req)>=0; }
+function motivoGer(r){ return r.motivo_gerencia||'el solicitante es el autorizador de su área'; }
+/** Avisa en vivo a Compras si, con la oferta propuesta, la compra la autorizará Gerencia (mismas reglas del servidor). */
+function evalGer(){
+  const box=$('gerInfo'); if(!box) return;
+  const ofs=leerOfertas(), p=ofs.find(o=>o.seleccionada), un=(($('coUnico')||{}).value||'').trim();
+  const umbral=cfgLista('umbral_gerencia',3000000), plz=cfgLista('plazo_gerencia',15), m=[];
+  if(p){
+    const val=Number(p.valor)||0, fle=p.importacion?(Number(p.flete)||0):0;
+    if(val+fle>umbral) m.push('valor de '+pesos(val+fle)+(fle?' (con flete de importación)':'')+', más de '+pesos(umbral));
+    if(p.pago==='Crédito' && (Number(p.plazo_credito_dias)||0)>plz) m.push('crédito a '+p.plazo_credito_dias+' días, más de '+plz);
+  }
+  if(ofs.length<cfgLista('min_cotizaciones',2) && un) m.push('proveedor único');
+  box.classList.toggle('hidden',!m.length);
+  box.innerHTML=m.length?'<b>Esta compra la autorizará Gerencia:</b> '+esc(m.join('; '))+'.':'';
 }
 function pendAut(){ return STATE.reqs.filter(r=>r.estado==='Cotizada' && puedeAutorizar(r)).length; }
 function estTxt(e){ return e==='Cotizada'?'Cotizada · por autorizar':e; }
@@ -666,12 +683,12 @@ function ofertasPanel(r){
   const of=ofertasDe(r.id_req); if(!of.length) return '';
   const min=Math.min.apply(null,of.map(o=>Number(o.valor_sin_iva)||0));
   const fila=o=>{ const v=Number(o.valor_sin_iva)||0, sel=o.seleccionada==='SI';
-    return `<tr${sel?' class="sel"':''}><td><b>${esc(o.proveedor)}</b>${sel?' <span class="pill Recibida">Propuesta</span>':''}${(v===min&&of.length>1)?' <span class="pill Autorizada">Menor valor</span>':''}
+    return `<tr${sel?' class="sel"':''}><td><b>${esc(o.proveedor)}</b>${sel?' <span class="pill Recibida">Propuesta</span>':''}${o.importacion==='SI'?' <span class="pill Cotizada">Importación</span>':''}${(v===min&&of.length>1)?' <span class="pill Autorizada">Menor valor</span>':''}
       <div class="rq-m">${o.n_cotizacion?'Cotización '+esc(o.n_cotizacion):''}</div></td>
       <td class="n">${pesos(v)}</td><td class="n">${Number(o.flete)?pesos(o.flete):'—'}</td>
       <td>${o.pago==='Crédito'?'Crédito '+esc(o.plazo_credito_dias)+' días':'Contado'}</td><td>${esc(o.transporte)}</td>
       <td>${o.plazo_entrega_dias?esc(o.plazo_entrega_dias)+' d':'—'}</td><td>${o.validez?fFecha(o.validez):'—'}</td></tr>`; };
-  return `<div class="panel"><h3>Cotizaciones comparadas <span class="rq-m">— valores sin IVA; el flete se muestra aparte y no se suma</span></h3>
+  return `<div class="panel"><h3>Cotizaciones comparadas <span class="rq-m">— valores sin IVA; el flete va aparte y solo cuenta para el límite de Gerencia si es importación</span></h3>
     <div class="tbl-wrap"><table class="fp"><thead><tr><th>Proveedor</th><th>Valor</th><th>Flete</th><th>Pago</th><th>Transporte</th><th>Entrega</th><th>Válida hasta</th></tr></thead><tbody>${of.map(fila).join('')}</tbody></table></div>
     ${r.proveedor_unico_just?`<p class="rq-m"><b>Proveedor único, justificación:</b> ${esc(r.proveedor_unico_just)}</p>`:''}
     ${r.sin_soporte_just?`<p class="rq-m"><b>Falta soporte documental, explicación:</b> ${esc(r.sin_soporte_just)}</p>`:''}
@@ -744,12 +761,13 @@ function ofertaHTML(o,i){
   o=o||{};
   return `<div class="ofer"><div class="ofer-h"><b>Oferta ${i+1}</b>
     <label class="radio"><input type="radio" name="ofSel" class="ofSel"${o.seleccionada==='SI'?' checked':''}> Proponer esta</label>
-    <button class="btn sec sm" onclick="this.closest('.ofer').remove()">Quitar</button></div>
+    <button class="btn sec sm" onclick="this.closest('.ofer').remove();evalGer()">Quitar</button></div>
     <div class="grid">
       <div><label class="f">Proveedor</label><input class="inp ofProv" list="dlProveedores" value="${esc(o.proveedor||'')}" onchange="ofProvCambio(this)"></div>
       <div><label class="f">N° cotización</label><input class="inp ofNum" value="${esc(o.n_cotizacion||'')}"></div>
       <div><label class="f">Valor sin IVA (COP)</label><input class="inp ofVal" inputmode="numeric" value="${esc(o.valor_sin_iva||'')}"></div>
       <div><label class="f">Flete aparte (COP)</label><input class="inp ofFle" inputmode="numeric" value="${esc(o.flete&&o.flete!=='0'?o.flete:'')}"></div>
+      <div><label class="f">¿Es importación? (el flete cuenta para el límite)</label><select class="inp ofImp"><option value="NO">No</option><option value="SI"${o.importacion==='SI'?' selected':''}>Sí</option></select></div>
       <div><label class="f">Pago</label><select class="inp ofPago" onchange="ofPagoCambio(this)">${cfgLista('pagos',['Contado','Crédito']).map(p=>`<option${(o.pago||'Contado')===p?' selected':''}>${p}</option>`).join('')}</select></div>
       <div class="ofPlzBox${o.pago==='Crédito'?'':' hidden'}"><label class="f">Plazo de crédito (días)</label><input class="inp ofPlz" inputmode="numeric" value="${esc(o.plazo_credito_dias||'')}"></div>
       <div><label class="f">Transporte</label><select class="inp ofTra"><option value="">Elige…</option>${cfgLista('transportes',['Entrega en planta','Recoge la empresa','Flete aparte']).map(t=>`<option${o.transporte===t?' selected':''}>${t}</option>`).join('')}</select></div>
@@ -773,7 +791,7 @@ function leerOfertas(){
     const num=k=>b.querySelector(k).value.replace(/[^\d]/g,'');
     return {proveedor:prov, id_proveedor:p?p.id_proveedor:'', n_cotizacion:b.querySelector('.ofNum').value.trim(), valor:num('.ofVal'), flete:num('.ofFle'),
       pago:b.querySelector('.ofPago').value, plazo_credito_dias:num('.ofPlz'), transporte:b.querySelector('.ofTra').value, plazo_entrega_dias:num('.ofEnt'),
-      validez:b.querySelector('.ofVig').value, nota:b.querySelector('.ofNota').value.trim(), seleccionada:b.querySelector('.ofSel').checked};
+      validez:b.querySelector('.ofVig').value, nota:b.querySelector('.ofNota').value.trim(), seleccionada:b.querySelector('.ofSel').checked, importacion:b.querySelector('.ofImp').value==='SI'};
   }).filter(o=>o.proveedor);
 }
 
@@ -784,7 +802,7 @@ function vistaAutorizaciones(){
   const tarjeta=r=>{ const n=ofertasDe(r.id_req).length;
     return `<div class="rq p-${esc(r.prioridad)}" onclick="abrirDetalle('${esc(r.id_req)}')" tabindex="0" onkeydown="if(event.key==='Enter')abrirDetalle('${esc(r.id_req)}')">
       <div class="rq-h"><span class="rq-n">${esc(r.consecutivo)}</span><span class="rq-a">${esc(r.area)}</span><span class="pill ${esc(r.prioridad)}">${esc(r.prioridad)}</span>
-        <span class="pill ${esc(r.estado)}">${esc(estTxt(r.estado))}</span></div>
+        <span class="pill ${esc(r.estado)}">${esc(estTxt(r.estado))}</span>${r.estado==='Cotizada'&&exigeGer(r)?' <span class="pill Cotizada">Gerencia</span>':''}</div>
       <div class="rq-m">${esc(r.solicitante_nombre)} — propuesta: ${esc(r.proveedor||'—')} ${r.valor_cotizado?pesos(r.valor_cotizado):''}${n?' — '+n+' oferta(s)':''}${r.autorizado_por?' — decidió: '+esc(r.autorizado_por):''}</div>
       <div class="rq-items">${esc(itemsDe(r.id_req).map(i=>i.cant+' '+i.unidad+' '+i.articulo).join(' · '))}</div></div>`; };
   return `<h3 style="margin:4px 0 10px">Por autorizar (${pend.length})</h3>${pend.map(tarjeta).join('')||'<div class="empty">No hay compras pendientes de tu autorización.</div>'}
@@ -840,6 +858,12 @@ async function accAutorizar(id, decision){
   const esperado={autorizar:'Autorizada',devolver:'Aprobada',rechazar:'Rechazada'}[decision];
   await enviarYConfirmar({accion:'autorizar',id_req:id,decision,nota}, ()=>reqActual(id).estado===esperado,
     {autorizar:'Compra autorizada',devolver:'Devuelta a Compras',rechazar:'Compra rechazada'}[decision]);
+}
+async function accEscalar(id){
+  const nota=$('auNota').value.trim();
+  if(!nota){ toast('Escribe por qué la escalas a Gerencia.','err'); return; }
+  if(!confirm('¿Escalar esta compra a la autorización de Gerencia?')) return;
+  await enviarYConfirmar({accion:'escalar',id_req:id,nota}, ()=>exigeGer(reqActual(id)), 'Compra escalada a Gerencia');
 }
 
 async function accComprar(id){
