@@ -203,6 +203,34 @@ footer.ver{text-align:center;color:var(--muted);font-size:.78rem;padding:10px 0 
   .top-u{display:none}
   .icon-btn{padding:6px 8px;font-size:.8rem}
 }
+/* ---------- v1.8: pantalla horizontal, tablet y celular girado ---------- */
+.top-in{padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+main{padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+.modal{max-height:calc(100vh - 24px);overflow-y:auto}
+@media (min-width:600px){ .toolbar{flex-wrap:nowrap} .toolbar select.inp{width:auto} }
+.st{min-width:0}
+.rq .st{font-size:.58rem;letter-spacing:-.2px}
+@media (min-width:820px){
+  .top-in,.tabs-in,main{max-width:1320px}
+  .rq-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .rq-list .rq{margin-bottom:0}
+  .cols2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .modal{max-width:680px}
+}
+@media (min-width:1200px){ .rq-list{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (orientation:landscape) and (max-height:520px){
+  header.top{position:static}
+  nav.tabs{top:0}
+  .top-in{padding-top:6px;padding-bottom:6px}
+  .top-u{display:none}
+  .tab{padding:9px 12px}
+  main{padding-top:10px;padding-bottom:72px}
+  .panel{padding:12px}
+  .fab{padding:10px 16px;bottom:calc(10px + env(safe-area-inset-bottom))}
+  .modal-bg{padding:10px 12px}
+  #loginScreen{align-items:flex-start;min-height:auto;padding:12px}
+  .toast{bottom:10px}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -252,7 +280,7 @@ footer.ver{text-align:center;color:var(--muted);font-size:.78rem;padding:10px 0 
 
 <script>
 // ================= CONFIG =================
-const APP_VERSION = '1.7';
+const APP_VERSION = '1.8';
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwprFkXpqGwNORgmXh-qXSxgCieiO1n07A95TqFaB_kCyju4T7d-ZsNQvbZHy42uIhV/exec';
 const SESION_KEY = 'rqpostecsa_sesion_v1';
 const ETAPAS = ['Solicitada','Clasificada','Aprobada','Cotizada','Autorizada','Comprada','Recibida'];
@@ -513,7 +541,7 @@ function vistaLista(){
       : 'No hay requisiciones que coincidan con el filtro.';
     return barra+`<div class="empty">${msg}</div>`;
   }
-  return barra+lista.map(r=>{
+  return barra+'<div class="rq-list">'+lista.map(r=>{
     const its=itemsDe(r.id_req);
     return `<div class="rq p-${esc(r.prioridad)}" onclick="abrirDetalle('${esc(r.id_req)}')" tabindex="0" onkeydown="if(event.key==='Enter')abrirDetalle('${esc(r.id_req)}')">
       <div class="rq-h"><span class="rq-n">${esc(r.consecutivo||'(sin número)')}</span>
@@ -524,7 +552,7 @@ function vistaLista(){
       <div class="rq-items">${esc(its.map(i=>i.cant+' '+i.unidad+' '+i.articulo).join(' · '))}</div>
       ${railHTML(r,false)}
     </div>`;
-  }).join('');
+  }).join('')+'</div>';
 }
 
 function abrirDetalle(id){
@@ -821,15 +849,16 @@ function vistaAutorizaciones(){
   const pend=STATE.reqs.filter(r=>r.estado==='Cotizada' && puedeAutorizar(r));
   const otras=STATE.reqs.filter(r=>r.estado==='Cotizada' && !puedeAutorizar(r));
   const hechas=STATE.reqs.filter(r=>r.autorizado_por && r.estado!=='Cotizada').sort((a,b)=>String(b.fecha_autorizacion).localeCompare(String(a.fecha_autorizacion))).slice(0,15);
+  const lst=a=>a.length?'<div class="rq-list">'+a.map(tarjeta).join('')+'</div>':'';
   const tarjeta=r=>{ const n=ofertasDe(r.id_req).length;
     return `<div class="rq p-${esc(r.prioridad)}" onclick="abrirDetalle('${esc(r.id_req)}')" tabindex="0" onkeydown="if(event.key==='Enter')abrirDetalle('${esc(r.id_req)}')">
       <div class="rq-h"><span class="rq-n">${esc(r.consecutivo)}</span><span class="rq-a">${esc(r.area)}</span><span class="pill ${esc(r.prioridad)}">${esc(r.prioridad)}</span>
         <span class="pill ${esc(r.estado)}">${esc(estTxt(r.estado))}</span>${r.estado==='Cotizada'&&exigeGer(r)?' <span class="pill Cotizada">Gerencia</span>':''}</div>
       <div class="rq-m">${esc(r.solicitante_nombre)} — propuesta: ${esc(r.proveedor||'—')} ${r.valor_cotizado?pesos(r.valor_cotizado):''}${n?' — '+n+' oferta(s)':''}${r.autorizado_por?' — decidió: '+esc(r.autorizado_por):''}</div>
       <div class="rq-items">${esc(itemsDe(r.id_req).map(i=>i.cant+' '+i.unidad+' '+i.articulo).join(' · '))}</div></div>`; };
-  return `<h3 style="margin:4px 0 10px">Por autorizar (${pend.length})</h3>${pend.map(tarjeta).join('')||'<div class="empty">No hay compras pendientes de tu autorización.</div>'}
-    ${otras.length?`<h3 style="margin:16px 0 10px">Pendientes de otro autorizador (${otras.length})</h3>${otras.map(tarjeta).join('')}`:''}
-    <h3 style="margin:16px 0 10px">Decididas recientemente</h3>${hechas.map(tarjeta).join('')||'<div class="empty">Aún no hay decisiones.</div>'}`;
+  return `<h3 style="margin:4px 0 10px">Por autorizar (${pend.length})</h3>${lst(pend)||'<div class="empty">No hay compras pendientes de tu autorización.</div>'}
+    ${otras.length?`<h3 style="margin:16px 0 10px">Pendientes de otro autorizador (${otras.length})</h3>${lst(otras)}`:''}
+    <h3 style="margin:16px 0 10px">Decididas recientemente</h3>${lst(hechas)||'<div class="empty">Aún no hay decisiones.</div>'}`;
 }
 
 // ================= ACCIONES =================
