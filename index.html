@@ -231,6 +231,10 @@ main{padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env
   #loginScreen{align-items:flex-start;min-height:auto;padding:12px}
   .toast{bottom:10px}
 }
+/* v1.9: aviso de actualización y novedades */
+.upd-banner{background:var(--action);color:#fff;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;padding:8px 12px;font-weight:600;position:sticky;top:0;z-index:60}
+.upd-banner button{background:#fff;color:var(--action-d);border:0;border-radius:8px;padding:6px 14px;font-weight:700}
+.nov-v{margin:0 0 12px}.nov-v h4{margin:0 0 4px;font-family:var(--fc);font-size:1.15rem}.nov-v ul{margin:0;padding-left:18px;font-size:.92rem}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -269,6 +273,7 @@ main{padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env
       <button class="icon-btn" onclick="abrirMenu()" title="Menú">Menú</button>
     </div>
   </header>
+  <div id="updBanner" class="upd-banner hidden"></div>
   <div id="sandboxBanner" class="sandbox-banner hidden">MODO PRUEBA — las operaciones NO se guardan</div>
   <nav class="tabs"><div class="tabs-in" id="tabsIn"></div></nav>
   <main id="vista"></main>
@@ -280,7 +285,7 @@ main{padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env
 
 <script>
 // ================= CONFIG =================
-const APP_VERSION = '1.8';
+const APP_VERSION = '1.9';
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwprFkXpqGwNORgmXh-qXSxgCieiO1n07A95TqFaB_kCyju4T7d-ZsNQvbZHy42uIhV/exec';
 const SESION_KEY = 'rqpostecsa_sesion_v1';
 const ETAPAS = ['Solicitada','Clasificada','Aprobada','Cotizada','Autorizada','Comprada','Recibida'];
@@ -422,6 +427,7 @@ async function iniciarApp(){
   await cargarDatos();
   if(pendientes().length) STATE.tab='bandeja';
   render();
+  novedadesPendientes();
 }
 
 async function cargarDatos(silencioso){
@@ -1507,6 +1513,8 @@ function abrirMenu(){
   modal(`<h3>${esc(STATE.usuario.nombre)}</h3>
     <p class="rq-m">${esc(STATE.correo)}<br>${STATE.usuario.roles.map(r=>esc(ROL_TXT[r]||r)).join(', ')}</p>
     <div class="row-actions" style="flex-direction:column;align-items:stretch">
+      <button class="btn sec" onclick="modalNovedades(true)">Novedades y versión (v${APP_VERSION})</button>
+      <button class="btn sec" onclick="forzarActualizacion()">Buscar actualización ahora</button>
       <button class="btn sec" onclick="modalPin()">Cambiar mi PIN</button>
       ${tiene('ADMIN')?`<button class="btn sec" onclick="modalUsuarios()">Gestionar usuarios</button>
         <button class="btn sec" onclick="modalMaestros()">Cargar maestros (catálogo, proveedores, precios)</button>
@@ -1597,6 +1605,59 @@ async function guardarUsuario(){
     'Usuario guardado'+(pin?' — entrega el PIN a '+nombre:''));
   if(ok) modalUsuarios();
 }
+
+// ================= NOVEDADES Y ACTUALIZACIONES (v1.9) =================
+// Cada versión nueva: agregar su bloque AL PRINCIPIO de NOVEDADES. Se muestra una vez por dispositivo al abrir.
+const NOVEDADES=[
+  {v:'1.9', f:'09/10/2026', t:['Aviso al abrir cuando hay una versión nueva, con botón para actualizar.','Esta ventana de novedades en cada actualización (también en Menú).','La tablet y el celular giran a horizontal.']},
+  {v:'1.8', f:'09/10/2026', t:['Pantalla horizontal: tarjetas en 2 o 3 columnas en tablet.','Celular girado: encabezado compacto y búsqueda en una sola fila.']},
+  {v:'1.7', f:'09/10/2026', t:['Botón «Avisar por WhatsApp» al responsable del siguiente paso, con el mensaje ya escrito.']},
+  {v:'1.6', f:'29/09/2026', t:['Nivel Gerencia: compras de más de $2.500.000, crédito mayor a 15 días o proveedor único van a Nohra.']},
+  {v:'1.5', f:'29/09/2026', t:['Autorización de compra con ofertas comparadas y documentos de soporte privados.']}
+];
+function modalNovedades(todas){
+  const lista=todas?NOVEDADES:NOVEDADES.slice(0,1);
+  modal(`<h3>${todas?'Novedades y versiones':'Se actualizó la app a la versión '+esc(APP_VERSION)}</h3>
+    <div style="margin-top:8px">${lista.map(n=>`<div class="nov-v"><h4>Versión ${esc(n.v)} <span class="rq-m">— ${esc(n.f)}</span></h4><ul>${n.t.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}</div>
+    <div class="row-actions"><button class="btn" onclick="cerrarModal()">Entendido</button></div>`);
+  try{ localStorage.setItem('rq_ver_vista',APP_VERSION); }catch(e){}
+}
+function novedadesPendientes(){
+  let vista=''; try{ vista=localStorage.getItem('rq_ver_vista')||''; }catch(e){}
+  if(vista!==APP_VERSION){ modalNovedades(false); }
+}
+function mostrarBannerActualizacion(nueva){
+  const b=$('updBanner'); if(!b) return;
+  b.innerHTML=`Hay una versión nueva (${esc(nueva)}) <button onclick="forzarActualizacion()">Actualizar ahora</button>`;
+  b.classList.remove('hidden');
+}
+async function versionPublicada(){
+  const r=await fetch('./index.html?v='+Date.now(),{cache:'no-store'});
+  if(!r.ok) throw new Error('http '+r.status);
+  const m=(await r.text()).match(/const APP_VERSION = '([^']+)'/);
+  return m?m[1]:'';
+}
+async function verificarActualizacion(){
+  try{
+    if(!navigator.onLine) return;
+    const v=await versionPublicada();
+    if(v && v!==APP_VERSION) mostrarBannerActualizacion(v);
+  }catch(e){}
+}
+async function forzarActualizacion(){
+  try{
+    const v=await versionPublicada();
+    if(v===APP_VERSION && $('updBanner').classList.contains('hidden')){ toast('Ya tienes la última versión ('+APP_VERSION+')'); cerrarModal(); return; }
+  }catch(e){}
+  try{ const regs=await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r=>r.unregister())); }catch(e){}
+  try{ const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); }catch(e){}
+  location.reload();
+}
+try{ screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); }catch(e){}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) verificarActualizacion(); });
+setInterval(verificarActualizacion,10*60*1000);
+window.addEventListener('load',()=>setTimeout(verificarActualizacion,3000));
+
 
 // ================= ARRANQUE =================
 $('loginPin').addEventListener('keydown',e=>{ if(e.key==='Enter') hacerLogin(); });
