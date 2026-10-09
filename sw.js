@@ -1,5 +1,5 @@
-// Requisiciones POSTECSA — Service Worker v1.6
-const CACHE_NAME = 'rq-postecsa-v1-6';
+// Requisiciones POSTECSA — Service Worker v1.7
+const CACHE_NAME = 'rq-postecsa-v1-7';
 // logo.jpg NO va en precache: si faltara, addAll fallaría y el SW no instalaría.
 const PRECACHE = ['./index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 

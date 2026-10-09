@@ -252,7 +252,7 @@ footer.ver{text-align:center;color:var(--muted);font-size:.78rem;padding:10px 0 
 
 <script>
 // ================= CONFIG =================
-const APP_VERSION = '1.6';
+const APP_VERSION = '1.7';
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwprFkXpqGwNORgmXh-qXSxgCieiO1n07A95TqFaB_kCyju4T7d-ZsNQvbZHy42uIhV/exec';
 const SESION_KEY = 'rqpostecsa_sesion_v1';
 const ETAPAS = ['Solicitada','Clasificada','Aprobada','Cotizada','Autorizada','Comprada','Recibida'];
@@ -401,7 +401,7 @@ async function cargarDatos(silencioso){
     const j=await leerGAS({accion:'datos',correo:STATE.correo,h:STATE.h});
     STATE.usuario=j.usuario; STATE.config=j.config;
     STATE.reqs=j.reqs||[]; STATE.items=j.items||[]; STATE.historial=j.historial||[]; STATE.usuarios=j.usuarios||[];
-    STATE.articulos=j.articulos||[]; STATE.proveedores=j.proveedores||[]; STATE.precios=j.precios||[]; STATE.numerosUsados=j.numeros_usados||[];
+    STATE.articulos=j.articulos||[]; STATE.proveedores=j.proveedores||[]; STATE.precios=j.precios||[]; STATE.numerosUsados=j.numeros_usados||[]; STATE.contactosWA=j.contactos_wa||[];
     STATE.documentos=j.documentos||[]; STATE.cotizaciones=j.cotizaciones||[]; STATE.autorizables=j.autorizables||[]; STATE.exigenGerencia=j.exigen_gerencia||[];
     STATE.reqs.sort((a,b)=>String(b.fecha_solicitud).localeCompare(String(a.fecha_solicitud)));
     if(!silencioso){ render(); }
@@ -563,6 +563,7 @@ function vistaDetalle(id){
     ${r.motivo_devolucion&&r.estado==='Aprobada'?`<div class="warn-box" style="margin-top:8px"><b>Devuelta por autorización (${fFecha(r.fecha_devolucion)}):</b> ${esc(r.motivo_devolucion)}</div>`:''}
     ${r.nota_autorizacion?`<div class="kv" style="margin-top:8px"><div class="k">Nota de ${r.estado==='Rechazada'?'rechazo de la compra':'autorización'}</div><div class="v" style="font-weight:500">${esc(r.nota_autorizacion)}</div></div>`:''}
     <div class="row-actions"><button class="btn sec sm" onclick="imprimirFP('${esc(id)}')">Imprimir / PDF FP-08-03</button></div>
+    ${avisoWAHTML(r)}
   </div>`;
 
   const tabla=`<div class="panel"><h3>Artículos — formato FP-08-03</h3><div class="tbl-wrap"><table class="fp">
@@ -657,6 +658,27 @@ function cfgLista(k,def){ return (STATE.config&&STATE.config[k])||def; }
 function esAutorizador(){ return tiene('AUTORIZADOR_COMPRA_MTTO')||tiene('AUTORIZADOR_COMPRA_GENERAL')||tiene('GERENCIA'); }
 /** Las reglas de quién autoriza viven solo en el servidor; aquí se lee qué puede autorizar esta persona. */
 function puedeAutorizar(r){ return (STATE.autorizables||[]).indexOf(r.id_req)>=0; }
+/** v1.7: aviso por WhatsApp al responsable del siguiente paso (abre WhatsApp con el mensaje ya escrito). */
+function rolesSiguiente(r){
+  if(r.estado==='Solicitada') return esMtto(r)?['CLASIFICADOR_MTTO']:['APROBADOR_GENERAL'];
+  if(r.estado==='Clasificada') return ['APROBADOR_MTTO'];
+  if(r.estado==='Aprobada'||r.estado==='Autorizada') return ['COMPRAS'];
+  if(r.estado==='Cotizada') return exigeGer(r)?['GERENCIA']:[esMtto(r)?'AUTORIZADOR_COMPRA_MTTO':'AUTORIZADOR_COMPRA_GENERAL'];
+  return [];
+}
+function telWA(t){ let d=String(t||'').replace(/\D/g,''); if(d.length===10 && d[0]==='3') d='57'+d; return /^\d{11,15}$/.test(d)?d:''; }
+function destinosWA(r){
+  const roles=rolesSiguiente(r), yo=STATE.usuario?STATE.usuario.nombre:'';
+  return (STATE.contactosWA||[]).filter(c=>c.nombre!==yo && String(c.roles).split(',').some(x=>roles.indexOf(x.trim().toUpperCase())>=0) && telWA(c.telefono));
+}
+function textoWA(r,c){
+  const que={Solicitada:esMtto(r)?'por clasificar':'por aprobar',Clasificada:'por aprobar',Aprobada:'por cotizar',Cotizada:'por autorizar',Autorizada:'por comprar'}[r.estado]||'pendiente';
+  return 'Hola '+String(c.nombre).split(' ')[0]+', la requisición '+r.consecutivo+' ('+r.area+', solicitada por '+r.solicitante_nombre+') está '+que+'. Por favor entra a la app: https://acmv0921.github.io/postecsa-requisiciones/';
+}
+function avisoWAHTML(r){
+  const ds=destinosWA(r); if(!ds.length) return '';
+  return `<div class="row-actions" style="margin-top:8px">${ds.map(c=>`<a class="btn sec sm" target="_blank" rel="noopener" href="https://wa.me/${telWA(c.telefono)}?text=${encodeURIComponent(textoWA(r,c))}">Avisar por WhatsApp a ${esc(String(c.nombre).split(' ')[0])}</a>`).join('')}</div>`;
+}
 function exigeGer(r){ return (STATE.exigenGerencia||[]).indexOf(r.id_req)>=0; }
 function motivoGer(r){ return r.motivo_gerencia||'el solicitante es el autorizador de su área'; }
 /** Avisa en vivo a Compras si, con la oferta propuesta, la compra la autorizará Gerencia (mismas reglas del servidor). */
